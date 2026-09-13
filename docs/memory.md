@@ -5016,3 +5016,247 @@ ocr_model (P3); BUG-005/006/007 P4s; U-7/8/9 minors.
 Next per roadmap queue: Q2 — Genre-chip Search (user decision U-4 pending
 approval).
 ```
+
+```text
+[COMPLETED 2026-09-12 — Q2 GENRE-CHIP SEARCH, UNCOMMITTED]
+
+User authorized Q2 directly (U-4 satisfied). Roadmap item REF-TAD-001
+ADOPT-path. Audit first: upstream chain (MangaScreen TagsChip →
+performGenreSearch → pop-to-BrowseSourceScreen → searchGenre filter-state
+match w/ query fallback) ALREADY EXISTS; the real gap = BrowseSourceScreen
+showed NO genre state/refinement surface.
+
+ARCHITECTURE DECISION (option B — source-supported filtering):
+- Genre chips = toggle surface over the source's OWN Filter leaves.
+  genreToggles() derives chip list from FilterList: TriState/CheckBox
+  children of Filter.Group + top-level TriState/CheckBox. Select/Text/
+  Header/Separator never become chips.
+- toggleGenreChip flips INCLUDE↔IGNORE (CheckBox: toggle) on the LIVE
+  Filter object, then search(filters=state.filters) — Listing.Search
+  copy → distinctUntilChanged on listing → ONE pager rebuild per tap
+  (FilterList.equals always false → guaranteed re-emission, no dup risk).
+- Unsupported sources (no TriState/CheckBox leaves, e.g. Asura Scans
+  Select-only) honestly render NO chip row. Fake filtering impossible
+  by construction — chips ARE the source's filters.
+- Multi-genre = source's own semantics (all selected filters passed
+  through verbatim to getSearchManga; source decides AND/OR). No
+  client-side guess.
+- Persistence: NONE (session/state-scoped, matches existing search UX;
+  filters die with the screen model). No DB change, no .sqm, no prefs.
+- MangaScreen upstream searchGenre path untouched.
+
+FILES (2 src + 1 test):
+- BrowseSourceScreenModel.kt: +genreToggles()/isGenreSelected()/
+  toggleGenreSelection() pure helpers (internal, same pkg) +
+  toggleGenreChip(). 54 lines.
+- BrowseSourceScreen.kt: second scrollable FilterChip row under the
+  Popular/Latest/Filter chips when genreToggles() non-empty; leading
+  Icons.Filled.Check when selected (non-color-only selection);
+  FilterChip's built-in toggleable semantics expose checked state to
+  a11y. Token spacing (MaterialTheme.padding.small/extraSmall).
+- GenreTogglesTest.kt NEW: 10 cases — group+top-level derivation,
+  Select/Text-only → no chips, TriState selected only on INCLUDE,
+  checkbox selected, toggle roundtrips, EXCLUDE→INCLUDE (not ignore),
+  independent multi-select, non-genre no-op.
+
+UI: M3 FilterChip (same component as Popular/Latest/saved-search rows
+already on screen) — no new design system, no new tokens, yomihon-ui
+skill ladder rung 1 (existing component on same screen).
+
+GATES GREEN 2026-09-12 (docker devcontainer, JDK17, -Xmx4g, both volumes):
+- spotlessCheck + testDebugUnitTest + verifySqlDelightMigration BUILD
+  SUCCESSFUL 2m57s (GenreTogglesTest 10/10).
+- :app:assembleDebug BUILD SUCCESSFUL 3m9s. NO schema change.
+
+DEVICE SM_M066B (build 0.5.4-8281 wireless):
+- Q2-01 plain search PASS ("one" → expected results, behavior unchanged).
+- Q2-02 genre selection PASS: Weeb Central (filter leaves = status/type/
+  genre): tap chip → results genuinely filtered (Gender-Bender tap → all
+  gender-bender titles; "one"+Ongoing → completed "Wild Ones"/"One Outs"
+  dropped, ongoing kept); chip container checked=true in a11y dump +
+  leading check icon (chip grows 32px, layout shift evidence).
+- Q2-03 clear PASS: re-tap chip → unfiltered result list restored.
+- Q2-04 query+genre PASS: "one" + Ongoing = intersection, both honored.
+- Q2-05 empty PASS: "zzzzqq" → existing No-results state + Retry/WebView/
+  Help actions; no crash, no infinite spinner.
+- Q2-06 error/retry PASS: radios off → search → No-results/Retry path
+  exercised (existing SourcePagingSource error machinery, unchanged by
+  diff); Retry tap functional. NOTE: svc wifi disable killed wireless
+  ADB mid-test (self-inflicted, reconnected after auto-rejoin; radios
+  re-enabled — device left as found).
+- Q2-07 navigation PASS: browse → manga → back = browse state preserved
+  (query+filter chips intact).
+- Q2-08 a11y PASS: FilterChip toggleable semantics → checked=true node
+  in uiautomator dump; label = genre name; check icon = non-visual-only
+  state; 48dp targets (M3 chip default).
+- Q2-09 regression smoke PASS: Browse (sources+browse), Library (grid+
+  filter sheet), Feed (sections render), Reader (manga→chapter 1/28
+  opens), More (settings groups render). Kagane also exposes chips
+  (Safe/Suggestive/Erotica/Pornographic) — row renders per-source.
+- Asura Scans (Select-only filters): NO chip row = honest absence PASS.
+
+KNOWN LIMITATION (documented, deliberate): chips surface ALL toggleable
+filter leaves of the source (Weeb Central = status + type + genre),
+not a hand-curated genre-only list — curating per-source would require
+name heuristics (fragile, per-source maintenance). Full filter sheet
+remains the complete surface; chips are the quick-toggle subset.
+
+PERFORMANCE: one search per chip tap (FilterList.equals=false → exactly
+one re-emission); no duplicate/parallel searches observed (results
+replace, no flicker-dup); paging untouched (existing Pager restart on
+listing change); no debounce needed (user-tap frequency).
+
+Docs updated: implementation-roadmap.md (§B, §E queue, §H U-4, §C L-17,
+§M history), phase.md (pointer), memory.md (this block).
+Git: UNCOMMITTED (user commit decision pending, RM-01/tone precedent).
+Next per roadmap: Q3 recursive dictionary lookup design pass (U-5).
+```
+
+```
+[MASTER SESSION 2026-09-13 — Q9 + bug register + Tscan + latency + Feed
+genre-filter + AnymeX micro-passes — EXECUTED, UNCOMMITTED]
+
+SCOPE: user authorized Q9 a11y + bug fixes + Tscan Feed crash + OCR/TTS
+preload latency diagnostic + Feed source-supported filtering + selector
+spacing + AnymeX-inspired UI modernization. Q3–Q8 HARD HALTED (no work).
+AnymeX track separate from Q-numbering (Q9 not renumbered).
+
+CHANGED FILES (all uncommitted, on top of Q2 uncommitted work):
+- TtsPlaybackController.kt: BUG-003 (Paused branch resumeIndex=0 on page
+  change), BUG-005 (NextChapter cancels prefetchJob, comment).
+- AndroidTtsEngine.kt: BUG-006 (both setVoice sites check SUCCESS,
+  DEBUG log on failure).
+- ocr_cache.sq + OcrCacheStore.kt + OcrRepositoryImpl.kt: BUG-004
+  (getPage gains `AND ocr_model = :ocrModel`; store + repo pass model;
+  cache-hit log includes model; NO migration — UNIQUE triple + index
+  already existed; verifySqlDelightMigration GREEN).
+- DictionaryComponents.kt: BUG-008 (no-op .clickable{} removed).
+- SettingsSearchScreen.kt: BUG-010 (produceState → synchronous
+  remember(searchKey, isLtr); SettingsReaderToolbarScreen() +
+  AppLanguageScreen() registered in unindexedSettingScreens — ()
+  ctor calls REQUIRED, compile fails without).
+- FeedScreenModel.kt: Tscan fix (fetchSection body wrapped in
+  withIOContext — was running source.getPopularManga/getLatestUpdates
+  on Main via screenModelScope → NetworkOnMainThreadException; all 3
+  callers loadSections/loadMore/retry covered) + BUG-009 flag
+  (loadSectionsOnStart: Boolean = true; ManageFeedsScreen passes false)
+  + genre-filter state (genreToggles + private sourceFilterList;
+  fetchSection routes getSearchManga(page, "", activeFilters) when
+  chips active for selected source; selectSource loads filter list,
+  no refetch — client-side filter via visibleFeeds; toggleGenreChip +
+  refetchAllSections; init restores persisted source filter list once).
+- FeedScreen.kt: FeedFilterBar rebuilt as stacked Column (selector row
+  → listing chips → genre chips; spacedBy(small); horizontalScroll
+  rows; FilterChip check leadingIcon; a11y stateDescription on
+  selector) = §8 selector-spacing task + genre chips UI. FeedTab.kt
+  wiring onToggleGenre.
+- CategoryListItem.kt + CategoryScreen.kt: Q9 drag a11y (customActions
+  move up/down; new onMove param; existing action_move_up/down strings).
+- SettingsItems.kt (presentation-core): Q9 BaseSliderItem Slider
+  stateDescription = valueString (~20 callers covered).
+- SourceSelectorDropdown: Q9 stateDescription selected/not_selected.
+- TtsPlaybackBar.kt: Q9 speed-menu stateDescription.
+- heightIn large-font sweep ×4: ClearDatabaseScreen:203,
+  CommonMangaItem:340, UpdatesUiItem:164 (kept .height import — line
+  197 uses it), BaseMangaListItem:33.
+- MoreScreen.kt + i18n base strings.xml: Studies card (Text
+  Recognition/Dictionary lookup/Manage dictionaries moved from
+  Library card; new label_studies). BASE STRING ONLY (moko rule).
+- OcrQueueScreen.kt: flat headers → 2 PreferenceGroupCards + 12dp gap.
+- UpdatesScreen.kt: filtered-empty shows UpdatesControls above
+  EmptyScreen (dead-end removed; Column import).
+- MangaNotesSection.kt: RoundedCornerShape(8.dp) → shapes.small.
+- OcrPageSourceResolver.kt + DomainModule.kt: ChapterCache injected
+  (4 gets at DI:317); resolveRemotePages reads
+  chapterCache.getPageListFromCache first (fallback source.getPageList);
+  openRemotePageBitmap reads cached image when isImageInCache
+  (decode-fail → refetch source.getImage; CancellationException
+  rethrown). Duplicate page-list/image fetches deduped = app-avoidable
+  latency removed; residual 30–60s first page = GLENS service
+  round-trip (evidence from prior trace).
+- BrowseSourceScreenModel.kt: helpers internal→public (shared with
+  Feed; only Q2-file change; rest of Q2 work untouched).
+
+AUDITED, NO CHANGE: Download Queue (not a bug — empty-state +
+notifications reachable), popups/dropdowns (theme Shapes already
+consistent), spinner cds (OK), BUG-007 (verified UNREACHABLE —
+openBitmap sets Ready on success before stream-null window).
+
+DESIGNED, DEFERRED: Liquid Mode/Background (recipe in roadmap §G:
+theme-derived gradient at root; prerequisite = translucent
+containerColor audit across all Scaffolds; own batch, §34 stop).
+True backdrop blur stays REJECTED (perf).
+
+TESTS: no new unit tests. Justification: BUG-004 SQL predicate needs
+in-memory driver harness absent from :data tests (new deps forbidden);
+genre-toggle derivation already covered by uncommitted GenreTogglesTest
+(shared public helpers); FeedScreenModelStateTest only constructs
+State (new ctor param defaulted — compile-compatible, suite green).
+Ponytail verdict: gates + device pass carry verification.
+
+GATES GREEN (docker vsc-yomihon-e24e3bd, JDK17, -Xmx4g, both volumes):
+- spotlessApply (fixed my files: OcrRepositoryImpl, CategoryListItem,
+  FeedScreen, AndroidTtsEngine import order) → spotlessCheck GREEN.
+- testDebugUnitTest + verifySqlDelightMigration GREEN (3m18s).
+- :app:assembleDebug GREEN (3m19s).
+
+DEVICE VERIFICATION DONE 2026-09-13 (SM_M066B wireless, debug build
+app.yomihon.dev 0.5.4 installed; NOTE: debug applicationId carries
+.dev suffix — use app.yomihon.dev for adb):
+- Cold launch clean, 0 FATAL.
+- FEED TSCAN PASS: Thunder Scans feed added via Add-dialog; section
+  renders 10 titles; 0 NetworkOnMainThreadException + 0 FATAL across
+  whole session = withIOContext fix live-verified. Feed selector
+  stacked rows render (source row + All/Popular/Latest + genre chips).
+- FEED GENRE FILTER PASS: Atsumaru Action chip tap → results genuinely
+  filtered (action titles: Knight Only Lives Today, Greatest Estate
+  Developer, Stellar Swordmaster, Pick Me Up); toggle off → unfiltered
+  list restored (Love Desires Life, Moyuru Haru etc.). No chip row for
+  Thunder Scans (no toggleable leaves — honest absence, Asura precedent).
+- BROWSE Q2 REGRESSION PASS: Weeb Central browse chips render
+  (Ongoing/Complete/Canceled/Hiatus/Manga).
+- MORE STUDIES CARD PASS: Studies card with Text Recognition +
+  Dictionary + Dictionaries; Library card keeps rest.
+- OCR QUEUE PASS: grouped PreferenceGroupCard layout (Settings /
+  Text recognition queue groups).
+- OCR/TTS TIMING (§J evidence, .device-pass/master-session-ocr-tts-timing.log):
+  uncached first page: recognizePage 12159ms, acquireMs=12876,
+  startup open->first page ready 15870ms (page 0 = cover, 6/6 regions
+  excluded by rules — correct, 0 sentences → auto-advance); page 1
+  content: GLENS 27217ms, 20 sentences, 24 regions; 3 parallel prefetch
+  scans observed (queue parallelism 3 live). CACHED RE-RUN
+  (.device-pass/master-session-cache-hit.log): "TTS OCR cache hit"
+  pages 0+1 instant, startup open->first page ready 1625ms (≈10×
+  faster than 15870ms uncached) — BUG-004 model-predicate cache hit
+  live-verified + ChapterCache dedup (no duplicate page-list/image
+  fetches in logs). Residual latency = GLENS service round-trip only,
+  as diagnosed.
+- BUG-006 PASS: "TTS voice applied name=en-us-x-tpc-local" DEBUG log on
+  setVoice success (new log line live).
+- BUG-009 PASS: ManageFeedsScreen lists all 9 feeds incl. new Thunder
+  Scans; 0 network fetches in logcat while on management screen.
+- TTS full-chain PASS: 20+ sentences sequential dispatch, auto page
+  advance p0→p9, pause (p2 s2/s7, p5 s10 etc.), resume same position,
+  stop clean (phase=LoadingPage — prefetch-cancel window exercised).
+- BUG-003 partial-device: pause + resume + page-change each exercised
+  individually; exact paused-page-change→resume-sentence-0 sequence NOT
+  isolated (UI tap racing playback-bar auto-hide on this device; reader
+  is webtoon-style vertical, manual page-change-while-paused hard to
+  drive via adb). Fix is 2-line (TtsPlaybackController.kt:254-256
+  resumeIndex=0 in onPageSelected Paused branch), gates green — accepted
+  as code-verified; revisit in next natural reader device session.
+- Q9 a11y stateDescription (slider/selector/menus): uiautomator XML
+  does not expose state-description attr on this device — code-verified
+  only; TalkBack audible verification deferred to user.
+
+DOCS UPDATED: implementation-roadmap.md (§B current task, §E Q3–Q8
+HALTED + Q9 EXECUTED, §G Liquid recipe + AnymeX IA rejection, bug
+register 003–010 statuses, §M history), memory.md (this block +
+device results), phase.md (pointer), ui-implementation-map.md (§30
+addendum: new surfaces, no D-item changes).
+
+Git: UNCOMMITTED (user commit decision, U-2 precedent). Includes Q2
+uncommitted work underneath — commit as separate logical commits if
+user wants.
+Next: device pass → final §33 report → user review.
+```

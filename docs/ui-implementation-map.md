@@ -714,3 +714,29 @@ source modified.
    structure (ListGroupHeader source name + bodySmall listing label);
    collapsing rejected (overloads the section-header role; current rhythm
    device-verified incl. D-05 divider removal).
+
+## 30. Master-session addendum (2026-09-13)
+
+D-01..D-15 register unchanged (no statuses altered — none of the
+touched files map to open D-items). New surfaces this session:
+
+- FeedFilterBar rebuilt: stacked Column (selector row → listing chips
+  → genre chips), spacedBy(small), horizontalScroll rows, M3 FilterChip
+  with check leadingIcon; selector a11y stateDescription. Selector
+  two-row spacing = task §8 satisfied. Reuses public
+  BrowseSourceScreenModel genre helpers (Q2 precedent).
+- MoreScreen: Studies card (Text Recognition / Dictionary lookup /
+  Manage dictionaries) — new i18n label_studies (base only).
+- OcrQueueScreen: two PreferenceGroupCards (Settings, Queue) + 12dp
+  gap — grouped-surface standard now met.
+- UpdatesScreen: filtered-empty shows UpdatesControls above
+  EmptyScreen (dead-end removed).
+- MangaNotesSection: shapes.small token (was 8dp literal).
+- Large-font: heightIn(min 56dp) sweep ×4 (ClearDatabaseScreen,
+  CommonMangaItem, UpdatesUiItem, BaseMangaListItem).
+- Q9 a11y: CategoryListItem customActions move up/down; BaseSliderItem
+  stateDescription; SourceSelectorDropdown selected-state cds;
+  TtsPlaybackBar speed-menu cds; spinner audit OK.
+- Not implemented (deferred, see roadmap §G): Liquid Mode/Background
+  (opaque Scaffolds hide background layers; needs translucent
+  containerColor audit — own batch).

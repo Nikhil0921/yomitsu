@@ -5,7 +5,27 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **Q1 v0.5.4 RELEASED 2026-09-12 (tag v0.5.4,
+Current phase pointer: **MASTER SESSION 2026-09-13 COMPLETE — code +
+  gates green, UNCOMMITTED, device verification PENDING. Scope: Q9 a11y
+  batch + bug fixes BUG-003/004/005/006/008/009/010 (BUG-007 verified
+  unreachable) + Tscan Feed NetworkOnMainThread fix (withIOContext) +
+  OCR/TTS latency (ChapterCache reuse in OcrPageSourceResolver) + Feed
+  source-supported genre filtering (reuses public Q2 helpers) + selector
+  spacing + AnymeX-inspired micro-passes (Studies card, grouped
+  OcrQueue, Updates empty-state controls, MangaNotes shapes.small) +
+  Liquid Mode/Background DESIGNED+DEFERRED (roadmap §G). Q3–Q8 HARD
+  HALTED by user. Gates green: spotlessCheck + testDebugUnitTest +
+  verifySqlDelightMigration + :app:assembleDebug (docker, JDK17, -Xmx4g).
+  Next: §28 device matrix + OCR/TTS timing evidence → §33 final report
+  → user commit decision.**
+  Prior: Q2 GENRE-CHIP SEARCH COMPLETE 2026-09-12
+  (implementation + gates green + device Q2-01..09 PASS on SM_M066B;
+  UNCOMMITTED awaiting user commit decision — same precedent as RM-01/tone
+  U-2). Genre chips = M3 FilterChip row in BrowseSourceScreen derived from
+  the source's own Filter leaves (TriState/CheckBox); toggle re-searches
+  via existing search(filters=); sources without such leaves honestly show
+  no row. Multi-genre = source semantics.
+  Prior: Q1 v0.5.4 RELEASED 2026-09-12 (tag v0.5.4,
   commit 9f228d07c, GitHub Latest with 5 ABI APKs; RM-01 + artwork-tone set
   shipped inside it as commit 0434d07a1, user-committed per U-2). All gates
   green; device smoke PASS on SM_M066B; PLUS user-requested pre-push fix:

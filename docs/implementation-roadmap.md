@@ -51,70 +51,28 @@ There is exactly ONE.
 
 ```text
 CURRENT AUTHORIZED TASK:
-    RM-01 — CLEANUP & PRE-RELEASE CONSOLIDATION BATCH
+    NONE — awaiting user authorization.
 
-OBJECTIVE:
-    Consolidate the audit findings into the smallest safe pre-release set:
-    (1) decide the artwork-tone set's commit path, (2) close the 3 stale-doc
-    contradictions found by the audit, (3) land the 2 highest-value TTS
-    seam fixes (P2 pause no-op during LoadingPage/Preparing + P2 chapter-
-    advance failure wedge), (4) sweep the 4 trivial dead-code items.
+    MASTER SESSION 2026-09-13 COMPLETED, UNCOMMITTED: Q9 a11y batch +
+    bug fixes (BUG-003/004/005/006/008/009/010 fixed, BUG-007 verified
+    unreachable = no action) + Tscan Feed NetworkOnMainThread fix +
+    OCR/TTS latency (ChapterCache reuse in OcrPageSourceResolver) +
+    Feed source-supported genre filtering (Q2 precedent, chips reusing
+    public BrowseSourceScreenModel helpers) + Feed selector spacing +
+    AnymeX-inspired UI micro-passes (Studies card, grouped OcrQueue,
+    Updates empty-state controls, MangaNotes shapes.small) + Feed
+    selector two-row spacing. Gates green (spotlessCheck +
+    testDebugUnitTest + verifySqlDelightMigration + assembleDebug).
+    DEVICE-VERIFIED 2026-09-13 (SM_M066B): Tscan Feed 0
+    NetworkOnMainThread + section renders; genre filter on/off live;
+    cached OCR startup 1625ms vs 15870ms uncached (10×, BUG-004 cache
+    predicate live); BUG-006/009 live; Studies card + OcrQueue groups +
+    Browse Q2 chips regression PASS; BUG-003 partial (code-verified,
+    sequence not isolated). Evidence .device-pass/master-session-*.log.
+    Awaiting user commit decision, same as U-2 precedent.
 
-SCOPE:
-    1. Artwork-tone set disposition: present commit options to user
-       (commit as-is / hold). NO further tuning code without approval.
-    2. TtsPlaybackController.pause() guard fix (Finding T-P2-1):
-       allow pause during Preparing/LoadingPage (drop the phase guard;
-       paused=true for any non-Idle phase). One hunk.
-    3. Chapter-advance failure wedge (Finding T-P2-2): ReaderViewModel
-       loadAdjacent failure → notify controller (event or callback →
-       controller.fail(TtsError.OcrError-family or dedicated
-       ChapterLoadFailed) so the user sees Error + retry instead of a
-       silent Preparing wedge. Minimal: emit existing Event channel.
-    4. Dead code sweep (P4s, zero-risk deletions only):
-       RecentTabContent.badgeNumber dead param; ReaderBottomBar
-       Modifier.pointerInput(Unit) {} no-op; OcrRepositoryImpl
-       detectionEngine() identical-branch if; memory.md Known-issue #2
-       → mark RESOLVED (docs only).
-    5. Docs corrections: architecture.md §reader-flow + memory.md
-       Known-issue #2 (dual setComposeContent RESOLVED in code);
-       next-phase-plan.md PART B row 12 (same); this file's §M history.
-
-FILES:
-    app/src/main/java/eu/kanade/tachiyomi/ui/reader/tts/TtsPlaybackController.kt
-    app/src/main/java/eu/kanade/tachiyomi/ui/reader/ReaderViewModel.kt
-    app/src/main/java/eu/kanade/tachiyomi/ui/recent/RecentTabContent.kt (+caller)
-    app/src/main/java/eu/kanade/presentation/reader/ReaderBottomBar.kt
-    data/src/main/java/mihon/data/ocr/OcrRepositoryImpl.kt (1-line if-cleanup)
-    docs/memory.md, docs/architecture.md, docs/next-phase-plan.md, this file
-    (Uncommitted artwork-tone files stay UNTOUCHED unless user orders commit.)
-
-REQUIRED SKILLS:
-    yomihon-ui (reader-adjacent UI), systematic-debugging (P2 root causes
-    already proven in code — re-verify before editing), test-driven-development
-    for the pause-guard change (controller has no JVM test harness — pure
-    domain policy is already covered; verify via existing suites + device).
-
-DEPENDENCIES:
-    None. All on committed baseline + uncommitted tone set (stack cleanly).
-
-ACCEPTANCE CRITERIA:
-    1. pause() takes effect during Preparing/LoadingPage (code-verified +
-       device: start Read Aloud on uncached page → tap Pause during
-       "Preparing…" → playback does not start after scan completes;
-       onStop during LoadingPage pauses).
-    2. Chapter-advance load failure surfaces Error phase with Retry
-       (device: airplane-mode + auto-next-chapter at chapter end → Error,
-       not eternal Preparing).
-    3. Dead code removed; zero behavioral change elsewhere.
-    4. Docs contradictions closed.
-
-VERIFICATION:
-    Full CI-order gates in docker (spotlessCheck → testDebugUnitTest →
-    verifySqlDelightMigration → :app:assembleDebug), then a device matrix:
-    TTS happy path (play/pause/resume/step), pause-during-Preparing,
-    chapter-advance failure (wifi off), toolbar customization regression,
-    artwork-tone regression (tint still renders). Record in memory.md.
+    Q3–Q8 HARD HALTED by user (2026-09-13): no work on them. Q9 was the
+    only authorized queue item this session.
 ```
 
 ---
@@ -138,7 +96,8 @@ VERIFICATION:
 | L-13 | 2026-09-11 | Accessibility pass (16 files: semantics, toggleable, cds) | 212a09c7b | device spot-verified | memory a11y block |
 | L-14 | 2026-09-11 | Batch 6: Continue stale-state fix + Recent nested-toolbar cleanup | 1bd50510d | device-verified | batch6-verify.log |
 | L-15 | 2026-09-11 | Batch 7: reader toolbar customization (drag-reorder, 13 tests) | 9126e20dc | USER-VERIFIED on device | toolbar-customize-test.log |
-| L-16 | 2026-09-11/12 | Artwork-reactive reader tray (stream-wait fix + 20%/2.5× tuning) | UNCOMMITTED (7 files) | gates green + device-scripted verify; user visual sign-off pending | /tmp/opencode/toned-menu-v2.png etc. |
+| L-16 | 2026-09-11/12 | Artwork-reactive reader tray (stream-wait fix + 20%/2.5× tuning) | 0434d07a1 (in v0.5.4) | gates green + device-scripted verify | /tmp/opencode/toned-menu-v2.png etc. |
+| L-17 | 2026-09-12 | Q2 genre-chip search (BrowseSourceScreen chip row over source Filter leaves + 10 unit tests) | UNCOMMITTED (2 src files + 1 test file + docs) | gates green; device Q2-01..09 PASS on SM_M066B (build 0.5.4-8281) | .device-pass/q2/ dumps + this §M |
 
 ---
 
@@ -198,10 +157,15 @@ Evidence basis: reference repos cloned + inspected 2026-09-12 (Tadami-Aniyomi-fo
 Strictly ordered. Each item gets its own batch + gates + device verify.
 
 ```text
-NEXT (authorized): Q2. Genre-chip search (REF-TAD-001 ADOPT-path): MangaScreen
-    genre row → clickable → same-source genre browse. Presentation + existing
-    browse screen; ~1 day with verify. (Q1 v0.5.4 RELEASED 2026-09-12.)
-  ↓
+STATUS 2026-09-13: Q3, Q4, Q5, Q6, Q7, Q8 HARD HALTED by user — do
+    not work on them without new authorization. Q9 EXECUTED in the
+    2026-09-13 master session (see §M history). Queue order below
+    preserved for whenever the halt lifts.
+
+NEXT (was): Q3. Recursive dictionary lookup design + implementation
+    (REF-CHI-001): design pass first (popup interaction, back-stack,
+    term-chaining UI), user approval of design (U-5), then implement in
+    OcrResultOverlay family.
   Q3. Recursive dictionary lookup design + implementation (REF-CHI-001):
     design pass first (popup interaction, back-stack, term-chaining UI),
     user approval of design, then implement in OcrResultOverlay family.
@@ -224,7 +188,10 @@ Q8. Feed auto near-end pagination (eligible; Load-more device-stable since 09-06
  ↓
 Q9. A11y completion micro-batch (CategoryListItem drag actions, BaseSliderItem
     label, SourceSelectorDropdown check cds, spinner cds) + large-font/sr
-    full sweep — schedule with any device session.
+    full sweep — schedule with any device session. **EXECUTED 2026-09-13**
+    (see §M history; CategoryListItem move actions, BaseSliderItem
+    stateDescription, SourceSelectorDropdown + TtsPlaybackBar cds,
+    heightIn large-font sweep ×4 files).
  ↓
 LATER: Anki screenshot/context capture (REF-CHI-006 PRD first); ResizableSheet
     24dp variant unification; Glance widget #12 (complaint-driven); D-15
@@ -268,6 +235,8 @@ LATER: Anki screenshot/context capture (REF-CHI-006 PRD first); ResizableSheet
 | Onboarding PermissionStep device test | — | Needs fresh install (user-data wipe forbidden) | Next fresh-install/emulator window |
 | GLENS retry live-verify / OCR eviction boundary (5000 pages) | — | Need natural 502 / 5000 pages | Opportunistic log watch |
 | Debug build tone-log removal note | — | **Resolved by audit**: tone logs are DEBUG priority → suppressed in release already; only 3 INFO logs ship (Glens timings, TTS startup). No action needed unless user wants silence | Optional RM-01 tweak |
+| Liquid Mode / Liquid Background (AnymeX theme system) | AnymeX | **Designed 2026-09-13, deferred**: opaque Scaffold containers hide any background layer — visible background requires translucent containerColor work across all screens (blast radius = every Scaffold surface) + its own device pass. RECIPE (when unblocked): theme-derived gradient (surfaceContainerLow→surfaceContainerHigh, subtle vertical) at root composition; per-screen containerColor audit is the prerequisite. Grain texture/OLED/poster-color sub-options considered OUT OF SCOPE until base background ships. Same §34 stop-condition logic as backdrop blur (perf-adjacent) | Own future batch after user authorization; prerequisite = translucent-container audit |
+| AnymeX settings IA (Accounts&Sync / Preferences&System / Appearance&Interface / Media&Playback / Extensions&Diagnostics regroup) | AnymeX | Rejected for now: Yomitsu settings IA is stable + indexed (search depends on it); regroup = churn without demand evidence | User request |
 
 ---
 
@@ -278,7 +247,7 @@ LATER: Anki screenshot/context capture (REF-CHI-006 PRD first); ResizableSheet
 | U-1 | "Create" tab referent (user referenced a tab that does not exist) | **OPEN** | Never clarified; plausible referents = Recent "Continue" tab or Feed add-dialog. Build nothing until clarified |
 | U-2 | Artwork-tone set: commit now (with RM-01) or hold? | **RESOLVED 2026-09-12** | User committed RM-01 + tone together as 0434d07a1; shipped in v0.5.4 |
 | U-3 | Tone visual sign-off (final human eyeball of tinted chrome) | **RESOLVED 2026-09-12** | Tone strength ratified (20%/2.5×), shipped in v0.5.4 unchanged; user authorized release containing it |
-| U-4 | Genre-chip search (Q2) — approve as next feature after RM-01/v0.5.4? | OPEN (recommend YES) | Best value/risk of all reference candidates |
+| U-4 | Genre-chip search (Q2) — approve as next feature after RM-01/v0.5.4? | **RESOLVED 2026-09-12** | User-authorized Q2 directly; IMPLEMENTED + device-verified, uncommitted awaiting user commit decision |
 | U-5 | Recursive dictionary lookup (Q3) — approve design pass? | OPEN (recommend YES) | Highest-value Chimahon idea within identity |
 | U-6 | DEBUG/INFO TTS+OCR timing logs in release: keep (harmless diagnostics) or downgrade to DEBUG? | OPEN (recommend keep) | Only 3 INFO lines ship; rules §7-compliant (no text content) |
 | U-7 | Dictionary card row `clickable{}` no-op: make row open the term, or remove affordance? | OPEN (recommend: remove clickable or wire to add) | UI-audit MINOR |
@@ -417,6 +386,8 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 | 2026-09-12 | RM-01 EXECUTED (unattended): BUG-001 pause guard fixed (pause works in any active non-Idle phase; Paused not clobbered by acquireSentences); BUG-002 fixed (loadAdjacent failure → controller.fail(ChapterLoadFailed) when Preparing/LoadingPage → Error + Retry; new TtsError.ChapterLoadFailed + i18n key); dead code swept (badgeNumber param + RecentTab badgeCount, ReaderBottomBar pointerInput no-op, detectionEngine identical branch + orphaned localOcrAvailable); docs corrected (memory Known-issue #2 → RESOLVED, architecture.md §3.8 historical note + header v0.5.3, next-phase-plan row + refs, this §M). Artwork-tone set UNTOUCHED + UNCOMMITTED (U-2 open). Gates all green (spotless 51s; unit+migration 4m29s; assembleDebug 3m20s). Device: APK 0.5.3-8275 installed on SM_M066B, app boots; full matrix NOT VERIFIED (device PIN-locked, no user present). Roadmap stays canonical; next task per queue = Q1 v0.5.4 release batch (after user commits) | opencode RM-01 session |
 | 2026-09-12 | RM-01 DEVICE VERIFICATION (attended follow-up, SM_M066B USB, Limitless Predation ch6→ch7→ch8): TEST 1 TTS happy path PASS (play/progress/prefetch/pause-from-Playing/resume-exact-sentence); TEST 2 pause-during-LoadingPage PASS via onStop (`TTS pause page=4 sentence=0`, zero speech after); TEST 3 chapter-advance failure PASS on cold process (radios off → advance → UnknownHost → Error + exact tts_error_chapter_load + Retry; Stop-from-Error; recovery online → ch8 dispatch + advance; cold ch6→ch7 transition OK); TEST 4 toolbar PASS (5 actions render, Settings sheet, Crop toggle, no crash); TEST 5 artwork-tone PASS at log level (tone sample + schedule Ready per page, no crash; tint not eyeball-checked). Contradiction: pill shows Stop-only during Preparing/LoadingPage, no Pause affordance — TEST 2 used onStop path. Device left as found (radios re-enabled). RM-01 COMPLETE; still uncommitted. | opencode RM-01 session |
 | 2026-09-12 | Q1 v0.5.4 RELEASE EXECUTED: user pre-committed RM-01+tone set as 0434d07a1 (U-2 = commit together, satisfied); gates green 3m; bump 0.5.4/vc30 (9b153610a); USER-REPORTED blocker pre-push — uncached OCR preload slow → root-caused and FIXED in 9f228d07c: PrioritizedTaskQueue bounded parallelism (3) + priority plumbing (OcrScanPriority; current page HIGH, prefetch NORMAL) + GLENS text-lock removed (stateless network engine) + parallel prefetch + depth 1→2 (elvis-precedence activeTasks bug also fixed after on-device negative-counter sighting; first superseded APK wedged once); 9 OCR unit tests updated/green; device-verified gap-free uncached playback + Error/Retry recovery; released tag v0.5.4 @ 9f228d07c, GitHub Latest, 5 ABI APKs, smoke PASS (v054-smoke.log + v054-smoke2.log). Residual ceiling documented: first-page GLENS round-trip 15-30s (service latency; 10B local OCR = upgrade path). Next: Q2 genre-chip search (U-4 approval pending). | opencode Q1 session |
+| 2026-09-12 | Q2 GENRE-CHIP SEARCH EXECUTED (U-4 satisfied by direct user task authorization): genre chip row in BrowseSourceScreen (2 source files, +73/+33 lines) derived from the source's OWN Filter leaves (TriState/CheckBox inside Group or top-level) via pure helpers genreToggles()/isGenreSelected()/toggleGenreSelection() in BrowseSourceScreenModel.kt; toggleGenreChip flips INCLUDE↔IGNORE then search(filters=) re-runs (one pager rebuild per tap — FilterList data-class equals=false guarantees distinctUntilChanged fires once); no new architecture (option B: source-supported filtering; upstream searchGenre() MangaScreen→browse path untouched); M3 FilterChip + leading check icon = non-color-only selection; sources without genre filter leaves honestly show no row (Asura Scans verified); multi-genre = source's own semantics (filters passed through verbatim). 10 unit tests green (GenreTogglesTest); gates green (spotlessCheck + testDebugUnitTest + verifySqlDelightMigration + assembleDebug); device SM_M066B 0.5.4-8281: Q2-01..09 PASS (search unchanged; chips checked=true a11y + results genuinely filtered — gender-bender evidence; clear restores; query+genre combo narrows; empty+Retry intact; nav/back state preserved; a11y checked semantics verified; Browse/Library/Feed/Reader/More smoke OK). Known limitation: Weeb Central filter leaves exposed = status+type+genre; chips are quick toggles over ALL such leaves, not a hand-curated genre list. Next: Q3 recursive dictionary lookup design. | opencode Q2 session |
+| 2026-09-13 | MASTER SESSION EXECUTED (user-authorized; Q3–Q8 HARD HALTED, Q9 + AnymeX-UI micro-track authorized): (1) Q9 a11y — CategoryListItem customActions move-up/down (+ CategoryScreen wiring, existing action_move_up/down strings), BaseSliderItem Slider stateDescription=valueString (~20 callers), SourceSelectorDropdown menu stateDescription selected/not_selected, TtsPlaybackBar speed menu stateDescription, large-font heightIn sweep ×4 (ClearDatabaseScreen/CommonMangaItem/UpdatesUiItem/BaseMangaListItem), spinner audit = OK no change. (2) Bugs: BUG-003 resumeIndex=0 on page-change-while-Paused; BUG-004 ocr_cache getPage model predicate (no migration, verify green); BUG-005 prefetch cancel on NextChapter; BUG-006 setVoice SUCCESS check + DEBUG log; BUG-007 verified UNREACHABLE = no action; BUG-008 no-op clickable removed; BUG-009 loadSectionsOnStart=false from ManageFeeds; BUG-010 synchronous remember + 2 screens registered in search index. (3) Tscan Feed NetworkOnMainThreadException — root cause: fetchSection body ran source calls on Main via screenModelScope → withIOContext wrap, all 3 callers covered. (4) OCR/TTS latency — ChapterCache injected into OcrPageSourceResolver: getPageListFromCache-first, image from cache when present (decode-fail → refetch, CancellationException rethrown); verdict: residual 30–60s first-page latency = mostly GLENS service round-trip, app-side duplicate fetches now deduped via cache. (5) Feed source-supported genre filtering (Q2 precedent): FeedScreenModel genreToggles state + getSearchManga routing when chips active, reuses public BrowseSourceScreenModel helpers; FeedFilterBar rebuilt as stacked two-row layout (selector row + chips rows, spacedBy(small), horizontalScroll) → also resolves §8 selector-spacing task. (6) AnymeX-inspired micro-passes: MoreScreen Studies card (Text Recognition/Dictionary/Manage dictionaries moved from Library; new label_studies i18n base string), OcrQueueScreen PreferenceGroupCard regroup, UpdatesScreen filtered-empty shows controls (no dead-end), MangaNotesSection shapes.small token. (7) Liquid Mode/Background DESIGNED + DEFERRED (recipe in §G). Gates green in docker (spotlessCheck after apply, testDebugUnitTest, verifySqlDelightMigration, :app:assembleDebug). No new unit tests: BUG-004 predicate needs driver harness absent from :data (new deps forbidden), genre derivation covered by existing GenreTogglesTest. Device verification PENDING (§28 matrix + OCR/TTS timing logcat). | opencode master session |
 
 ---
 
@@ -426,14 +397,14 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 |---|---|---|---|---|---|
 | BUG-001 | P2 | TTS controller | `pause()` no-op during LoadingPage/Preparing → focus loss / onStop during OCR acquire does not pause; next page speaks unfocused/backgrounded; pill Pause tap dead while loading | Phase guard `if (phase != Playing && !paused) return` (TtsPlaybackController.kt:172-180) | **FIXED (RM-01)** — guard dropped; pause = any non-Idle/Finished/Error phase; acquireSentences no longer clobbers Paused. Code VERIFIED (gates); DEVICE VERIFIED (SM_M066B: HOME mid-acquire → `TTS pause page=4 sentence=0` during LoadingPage, zero speech after; pill shows Stop-only in that phase so onStop path used) |
 | BUG-002 | P2 | TTS chapter advance | NextChapter host-load failure leaves controller wedged in Preparing forever; no error, no retry path | loadAdjacent swallows errors without event (ReaderViewModel.kt:563-570); rebind only on chapter-id change (:340-344) | **FIXED (RM-01)** — loadAdjacent catch → controller.fail(ChapterLoadFailed) when phase Preparing/LoadingPage → Error + Retry; new i18n key tts_error_chapter_load. Code VERIFIED (gates); DEVICE VERIFIED (SM_M066B cold process, radios off: advance → UnknownHost → Error + exact chapter-load message + Retry; Stop-from-Error; recovery online → ch8 dispatch + advance) |
-| BUG-003 | P3 | TTS resume | resumeIndex carried across user page change while Paused → resume speaks arbitrary sentence of new page | onPageSelected Paused branch updates pageIndex but not resumeIndex (TtsPlaybackController.kt:237-240) | Open → RM-01 follow-up or Q-batch |
-| BUG-004 | P3 | OCR cache | getPage ignores ocr_model → engine switch serves stale other-model results, never rescans | ocr_cache.sq:40-46 no model predicate; scanPage cache pre-check returns early (OcrRepositoryImpl.kt:230-233) | Open → 10B-class batch |
-| BUG-005 | P4 | TTS prefetch | NextChapter transition does not cancel old-chapter prefetch (bounded waste during chapter load window) | TtsPlaybackController.kt:445-453 | Open (LOW) |
-| BUG-006 | P4 | TTS engine | setVoice result ignored (contrast setLanguage) | AndroidTtsEngine.kt:239-247 | Open (LOW) |
-| BUG-007 | P4 | Exclusion capture | `stream == null` page bypasses original-dims guard (zone on transformed page possible if openBitmap succeeded un-Ready — narrow window) | ReaderActivity.kt:1265-1278 conditional guard | Open (LOW) |
-| BUG-008 | P4 | Dictionary UI | Result-card row `clickable{}` no-op affordance | DictionaryComponents.kt:298 | Open (U-7) |
-| BUG-009 | P4 | Feed mgmt | ManageFeedsScreen instantiates FeedScreenModel → network fetch of every enabled feed on a management screen | ManageFeedsScreen.kt:52 + model init | Open (U-8) |
-| BUG-010 | P4 | Settings search | produceState gap = blank flash; toolbar screen unindexed | SettingsSearchScreen.kt:221, 323-335 | Open (U-9) |
+| BUG-003 | P3 | TTS resume | resumeIndex carried across user page change while Paused → resume speaks arbitrary sentence of new page | onPageSelected Paused branch updates pageIndex but not resumeIndex (TtsPlaybackController.kt:237-240) | **FIXED (2026-09-13 session)** — Paused branch also sets resumeIndex=0; resetSession at rebind unchanged. Gates green; device partial-verified (pause/resume/page-change exercised; paused-page-change sequence not isolated — code-verified, revisit next reader device session) |
+| BUG-004 | P3 | OCR cache | getPage ignores ocr_model → engine switch serves stale other-model results, never rescans | ocr_cache.sq:40-46 no model predicate; scanPage cache pre-check returns early (OcrRepositoryImpl.kt:230-233) | **FIXED (2026-09-13 session)** — getPage gains `AND ocr_model = :ocrModel` (UNIQUE triple + index already exist → NO migration; verifySqlDelightMigration green); OcrCacheStore.getPage + OcrRepositoryImpl.getCachedPage pass model; cache-hit log includes model. Device-verified live: cached startup 1625ms vs 15870ms uncached. No new unit test (no Robolectric/driver harness in :data — new deps forbidden) |
+| BUG-005 | P4 | TTS prefetch | NextChapter transition does not cancel old-chapter prefetch (bounded waste during chapter load window) | TtsPlaybackController.kt:445-453 | **FIXED (2026-09-13 session)** — NextChapter branch cancels prefetchJob; resetSession at rebind still covers |
+| BUG-006 | P4 | TTS engine | setVoice result ignored (contrast setLanguage) | AndroidTtsEngine.kt:239-247 | **FIXED (2026-09-13 session)** — both setVoice sites check SUCCESS, DEBUG log on failure |
+| BUG-007 | P4 | Exclusion capture | `stream == null` page bypasses original-dims guard (zone on transformed page possible if openBitmap succeeded un-Ready — narrow window) | ReaderActivity.kt:1265-1278 conditional guard | **NO ACTION (verified unreachable 2026-09-13)** — reaching it requires openBitmap to succeed while page un-Ready, which cannot occur (openBitmap sets Ready on success first) |
+| BUG-008 | P4 | Dictionary UI | Result-card row `clickable{}` no-op affordance | DictionaryComponents.kt:298 | **FIXED (2026-09-13 session, resolves U-7)** — no-op clickable removed (recommendation "remove affordance" taken) |
+| BUG-009 | P4 | Feed mgmt | ManageFeedsScreen instantiates FeedScreenModel → network fetch of every enabled feed on a management screen | ManageFeedsScreen.kt:52 + model init | **FIXED (2026-09-13 session, resolves U-8)** — `loadSectionsOnStart: Boolean = true` ctor param; ManageFeedsScreen passes false; default true keeps all other callers unchanged |
+| BUG-010 | P4 | Settings search | produceState gap = blank flash; toolbar screen unindexed | SettingsSearchScreen.kt:221, 323-335 | **FIXED (2026-09-13 session, resolves U-9)** — synchronous `remember(searchKey, isLtr)`; SettingsReaderToolbarScreen + AppLanguageScreen registered in unindexedSettingScreens |
 | BUG-011 | P4 | Dead code | badgeNumber dead param; pointerInput no-op; detectionEngine identical branches; ~60 lines unreachable scanLocally/cropBitmap | RecentTab.kt:68-72; ReaderBottomBar.kt:41; OcrRepositoryImpl.kt:158-168,513-574 | **FIXED (RM-01, first 3 items)**; scanLocally/cropBitmap deletion deferred with det-engine ceiling (architecture table J) |
 | BUG-012 | P4 | Docs | Known-issue #2 (dual setComposeContent) stale — code has ONE composition block | ReaderActivity.kt:321-323,606 grep clean; memory.md:2478-2482 | **FIXED (RM-01)** — memory + architecture + next-phase-plan corrected |
 
