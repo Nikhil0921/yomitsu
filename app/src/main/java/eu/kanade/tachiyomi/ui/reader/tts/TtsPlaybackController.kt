@@ -249,8 +249,11 @@ internal class TtsPlaybackController(
             if (isActivePlayback) {
                 rebuildQueueForUserNavigation(pageIndex)
             } else {
-                // Paused: just update the page index so resume continues from the right place.
+                // Paused: update the page index and reset the sentence index so
+                // resume starts from the top of the NEW page instead of carrying
+                // the old page's resumeIndex (BUG-003).
                 mutableState.update { it.copy(pageIndex = pageIndex) }
+                resumeIndex = 0
             }
         }
     }
@@ -461,6 +464,10 @@ internal class TtsPlaybackController(
                 mutableState.update { it.copy(phase = TtsPhase.Preparing, sentenceText = "") }
                 engine.stop()
                 engine.abandonFocus()
+                // Cancel old-chapter prefetch; resetSession at rebind also covers
+                // this, but the load window can keep scans running wastefully.
+                prefetchJob?.cancel()
+                prefetchJob = null
                 eventChannel.send(TtsEvent.AdvanceChapter)
                 // Host loads the next chapter and rebinds us via start().
                 return false

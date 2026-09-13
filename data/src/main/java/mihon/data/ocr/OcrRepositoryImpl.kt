@@ -222,7 +222,9 @@ class OcrRepositoryImpl(
         priority: OcrScanPriority,
     ): OcrPageResult {
         getCachedPage(chapterId, pageIndex)?.let { cached ->
-            logcat(LogPriority.DEBUG) { "OCR scan cache hit chapter=$chapterId page=$pageIndex" }
+            logcat(LogPriority.DEBUG) {
+                "OCR scan cache hit chapter=$chapterId page=$pageIndex model=${cached.ocrModel}"
+            }
             return cached
         }
 
@@ -308,6 +310,7 @@ class OcrRepositoryImpl(
         return cacheStore.getPage(
             chapterId = chapterId,
             pageIndex = pageIndex,
+            ocrModel = ocrModelPref.get(),
         )
     }
 

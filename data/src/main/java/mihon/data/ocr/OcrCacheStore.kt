@@ -71,12 +71,14 @@ internal class OcrCacheStore(
     suspend fun getPage(
         chapterId: Long,
         pageIndex: Int,
+        ocrModel: OcrModel,
     ): OcrPageResult? {
         return mutex.withLock {
             val db = getDatabase()
             val page = db.ocr_cacheQueries.getPage(
                 chapterId = chapterId,
                 pageIndex = pageIndex.toLong(),
+                ocrModel = ocrModel.name,
             ) { _id, _chapterId, _pageIndex, _ocrModel, imageWidth, imageHeight, _createdAt ->
                 OcrPageRow(
                     id = _id,

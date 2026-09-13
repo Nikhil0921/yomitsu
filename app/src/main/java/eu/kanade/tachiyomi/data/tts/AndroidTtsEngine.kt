@@ -232,8 +232,14 @@ class AndroidTtsEngine(
                 if (defaultVoice == null) {
                     logcat(LogPriority.DEBUG) { "TTS system default fallback: no default voice" }
                 } else {
-                    engine.setVoice(defaultVoice)
-                    logcat(LogPriority.DEBUG) { "TTS default voice restored name=${defaultVoice.name}" }
+                    val result = engine.setVoice(defaultVoice)
+                    if (result == TextToSpeech.SUCCESS) {
+                        logcat(LogPriority.DEBUG) { "TTS default voice restored name=${defaultVoice.name}" }
+                    } else {
+                        logcat(LogPriority.DEBUG) {
+                            "TTS default voice apply failed name=${defaultVoice.name} result=$result"
+                        }
+                    }
                 }
             }
             is TtsVoiceSelection.Voice -> {
@@ -241,8 +247,12 @@ class AndroidTtsEngine(
                 if (voice == null) {
                     logcat(LogPriority.DEBUG) { "TTS voice fallback: voice unavailable name=$voiceName" }
                 } else {
-                    engine.setVoice(voice)
-                    logcat(LogPriority.DEBUG) { "TTS voice applied name=${voice.name}" }
+                    val result = engine.setVoice(voice)
+                    if (result == TextToSpeech.SUCCESS) {
+                        logcat(LogPriority.DEBUG) { "TTS voice applied name=${voice.name}" }
+                    } else {
+                        logcat(LogPriority.DEBUG) { "TTS voice apply failed name=${voice.name} result=$result" }
+                    }
                 }
             }
             is TtsVoiceSelection.Language -> {

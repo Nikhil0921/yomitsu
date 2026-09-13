@@ -42,7 +42,7 @@ SELECT _id, chapter_id, page_index, ocr_model, image_width, image_height, create
 FROM ocr_pages
 WHERE chapter_id = :chapterId
 AND page_index = :pageIndex
-ORDER BY created_at DESC, _id DESC
+AND ocr_model = :ocrModel
 LIMIT 1;
 
 getCachedChapterIds:
