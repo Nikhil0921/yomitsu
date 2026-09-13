@@ -5555,3 +5555,28 @@ DEFERRED (retained): Q3-Q8 = HALTED; Liquid Background = DEFERRED;
 STATUS: RELEASE CANDIDATE READY. Awaiting explicit user authorization
 for commit / tag / push / GitHub Release.
 ```
+
+```text
+[COMPLETED 2026-09-13 — v0.5.4.1 RELEASED (user-authorized)]
+
+User authorized full release. Actions taken:
+- Commit 2af00b105 "release: v0.5.4.1" (4 files: build.gradle.kts version
+  bump, CHANGELOG, memory.md, phase.md) — pushed to main.
+- Release build: assembleRelease -Pinclude-telemetry -Penable-updater
+  (docker, JDK17, -Xmx4g) BUILD SUCCESSFUL 12m54s. Output metadata:
+  applicationId=app.yomihon, versionCode=31, versionName=0.5.4.1 (no
+  suffix — release), 5 ABI APKs + baseline profiles. ML models verified
+  packaged (ocr_fast encoder/decoder + panel_detector; legacy ocr/ set
+  gone since v0.5.3 — correct).
+- Tag v0.5.4.1 created + pushed. NOTE: first push also uploaded old local
+  tags v0.3.x–v0.5.4 (were local-only) — harmless.
+- GitHub release published: Nikhil0921/yomitsu v0.5.4.1 "Yomitsu v0.5.4.1",
+  Latest (api confirmed), 5 ABI APKs attached, notes = CHANGELOG entry.
+  https://github.com/Nikhil0921/yomitsu/releases/tag/v0.5.4.1
+  Gotcha hit: gh defaulted to yomihon/yomihon remote — needed
+  --repo Nikhil0921/yomitsu.
+- In-app updater (points at this fork) will prompt v0.5.4 users.
+
+Release state: DONE. Next per roadmap queue: Q3 recursive dictionary
+lookup design pass (U-5).
+```

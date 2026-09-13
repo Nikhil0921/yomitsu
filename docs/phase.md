@@ -5,7 +5,14 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **RELEASE CANDIDATE v0.5.4.1 PREPARED 2026-09-13 —
+Current phase pointer: **v0.5.4.1 RELEASED 2026-09-13 (user-authorized).
+  Commit 2af00b105 (version bump 0.5.4.1/vc31 + CHANGELOG + docs), tag
+  v0.5.4.1 pushed, GitHub Latest release published with 5 ABI APKs
+  (release build 12m54s green, ML models packaged, metadata verified
+  vc31/0.5.4.1). Device candidate verification done pre-release (see
+  memory.md RC block). Next per roadmap: Q3 recursive dictionary lookup
+  design pass (U-5).**
+  Prior: **RELEASE CANDIDATE v0.5.4.1 PREPARED 2026-09-13 —
   version bumped 0.5.4→0.5.4.1 / versionCode 30→31 (app/build.gradle.kts,
   single source of truth), CHANGELOG entry added. All 4 gates GREEN in one
   chained run (docker vsc-yomihon-e24e3bd…, JDK17 -Xmx4g: spotlessCheck +
