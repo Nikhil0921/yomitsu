@@ -65,6 +65,50 @@ import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 import java.time.Instant
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
+/**
+ * Toggleable tag/genre-like filter leaves exposed as quick genre chips.
+ * Only filters the source actually applies (TriState/CheckBox) surface here;
+ * Select/Text-only genre sources honestly show no chips (full filter sheet still applies).
+ * Shared with the Feed source filter (same source-owned Filter semantics).
+ */
+fun FilterList.genreToggles(): List<SourceModelFilter<*>> = flatMap { filter ->
+    when (filter) {
+        is SourceModelFilter.Group<*> -> filter.state.filterIsInstance<SourceModelFilter<*>>().filter {
+            it is SourceModelFilter.TriState || it is SourceModelFilter.CheckBox
+        }
+        is SourceModelFilter.TriState, is SourceModelFilter.CheckBox -> listOf(filter)
+        else -> emptyList()
+    }
+}
+
+fun SourceModelFilter<*>.isGenreSelected(): Boolean = when (this) {
+    is SourceModelFilter.TriState -> state == SourceModelFilter.TriState.STATE_INCLUDE
+    is SourceModelFilter.CheckBox -> state
+    else -> false
+}
+
+/** Flip this filter's include state (TriState INCLUDE↔IGNORE, CheckBox toggle). Non-genre filters: no-op. */
+fun SourceModelFilter<*>.toggleGenreSelection(): Boolean {
+    return when (this) {
+        is SourceModelFilter.TriState -> {
+            state =
+                if (state ==
+                    SourceModelFilter.TriState.STATE_INCLUDE
+                ) {
+                    SourceModelFilter.TriState.STATE_IGNORE
+                } else {
+                    SourceModelFilter.TriState.STATE_INCLUDE
+                }
+            true
+        }
+        is SourceModelFilter.CheckBox -> {
+            state = !state
+            true
+        }
+        else -> false
+    }
+}
+
 class BrowseSourceScreenModel(
     private val sourceId: Long,
     listingQuery: String?,
@@ -297,6 +341,17 @@ class BrowseSourceScreenModel(
                 listing = listing,
                 toolbarQuery = listing.query,
             )
+        }
+    }
+
+    /**
+     * Toggle a genre chip: flips its filter between INCLUDE and IGNORE
+     * (CheckBox: true/false), leaving all other filters untouched, then
+     * re-runs the search with the updated filter list.
+     */
+    fun toggleGenreChip(filter: SourceModelFilter<*>) {
+        if (filter.toggleGenreSelection()) {
+            search(filters = state.value.filters)
         }
     }
 

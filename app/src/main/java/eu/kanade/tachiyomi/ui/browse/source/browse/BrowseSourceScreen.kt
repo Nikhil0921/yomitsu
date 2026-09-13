@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.NewReleases
@@ -227,6 +228,35 @@ data class BrowseSourceScreen(
                                     )
                                 },
                             )
+                        }
+                    }
+
+                    val genreToggles = state.filters.genreToggles()
+                    if (genreToggles.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = MaterialTheme.padding.small)
+                                .padding(top = MaterialTheme.padding.extraSmall),
+                            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+                        ) {
+                            genreToggles.forEach { filter ->
+                                val selected = filter.isGenreSelected()
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { screenModel.toggleGenreChip(filter) },
+                                    leadingIcon = {
+                                        if (selected) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                            )
+                                        }
+                                    },
+                                    label = { Text(text = filter.name) },
+                                )
+                            }
                         }
                     }
 
