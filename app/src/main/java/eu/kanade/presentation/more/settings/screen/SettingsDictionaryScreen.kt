@@ -78,6 +78,7 @@ import eu.kanade.domain.dictionary.OcrResultPresentation
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.PreferenceItem
+import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
 import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.ui.setting.dictionary.DictionarySettingsScreenModel
 import eu.kanade.tachiyomi.util.system.toast
@@ -603,21 +604,14 @@ private fun rememberOcrResultPreferences(
 private fun OcrResultPreferenceGroup(
     preferences: List<Preference.PreferenceItem<out Any, out Any>>,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+    PreferenceGroupCard(
+        title = stringResource(MR.strings.pref_category_dictionary_ocr_results),
     ) {
-        Column {
-            eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader(
-                title = stringResource(MR.strings.pref_category_dictionary_ocr_results),
+        preferences.forEach { item ->
+            PreferenceItem(
+                item = item,
+                highlightKey = null,
             )
-            preferences.forEach { item ->
-                PreferenceItem(
-                    item = item,
-                    highlightKey = null,
-                )
-            }
         }
     }
 }

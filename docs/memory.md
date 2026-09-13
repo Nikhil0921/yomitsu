@@ -5580,3 +5580,75 @@ User authorized full release. Actions taken:
 Release state: DONE. Next per roadmap queue: Q3 recursive dictionary
 lookup design pass (U-5).
 ```
+
+```text
+[COMPLETED 2026-09-13 — ANYMEX UI MODERNIZATION MICRO-BATCH, UNCOMMITTED]
+
+User-authorized AnymeX-inspired UI track (post-v0.5.4.1). Reference =
+AnymeX screenshots/analysis already registered (roadmap §D/§G) — visual
+intent only (hierarchy, grouping, rhythm); NO cloning, NO Liquid, NO
+blur, NO IA regroup, NO nav changes, NO new deps, NO DB changes.
+
+AUDIT FIRST: re-verified prior findings still in source: DS-01
+(SettingsDictionaryScreen OcrResultPreferenceGroup = loose header+Box,
+last grouped-settings holdout), DS-03 (SettingsSearch 24/14dp literal
+row paddings vs 16dp token rhythm everywhere else), DS-06 (Feed
+customize action = List icon + "Settings" title), DS-02
+(MangaCompactGridItem CoverTextOverlay scrim Color(0xAA000000)),
+FeedCustomizeDialog card spacedBy(8dp) vs frozen 12dp grouped rhythm.
+Everything else already converged (09-13 matrices); DS-07/32dp empty
+insets = documented tolerance, left alone.
+
+CHANGES (5 files):
+1. SettingsDictionaryScreen.kt: OcrResultPreferenceGroup →
+   PreferenceGroupCard(title=pref_category_dictionary_ocr_results);
+   Box+PreferenceGroupHeader dialect deleted; rows flat inside card.
+2. SettingsSearchScreen.kt: result-row padding 24/14dp → 16/12dp
+   (token rhythm; matches sibling list rows).
+3. FeedScreen.kt: customize action icon Icons.Outlined.List →
+   GridView (icon matches grid/display purpose); FeedCustomizeDialog
+   spacedBy(small) → spacedBy(12.dp) (grouped-card rhythm).
+4. CommonMangaItem.kt: CoverTextOverlay gradient end
+   Color(0xAA000000) → MaterialTheme.colorScheme.scrim.copy(0.67f)
+   (token; same scrim family as reader overlays; visual parity 0xAA).
+
+PRESERVED: Feed §17/§18 contract untouched (row/chips/genre/paging/
+persistence verified post-change on device); Q2 Browse untouched;
+settings search index untouched; all a11y semantics untouched.
+
+GATES GREEN 2026-09-13 (docker vsc-yomihon-e24e3bd…, JDK17, -Xmx4g,
+both volumes): spotlessApply→spotlessCheck + :app:compileDebugKotlin
+3m3s; chained spotlessCheck + testDebugUnitTest +
+verifySqlDelightMigration + :app:assembleDebug BUILD SUCCESSFUL 3m15s.
+
+DEVICE VERIFIED SM_M066B (debug arm64 fresh install, 720×1600):
+- Dictionaries screen: OCR-results rows inside tonal card — pixel
+  band proof (card px 34,47,49 vs background 32,33,37), header in
+  card, rows x=56 aligned with other grouped screens; Recommended
+  Dictionaries + items render below; 0 crash.
+- Settings search "read": live results, rows left-aligned 16dp
+  rhythm (title x=28px ≈ 16dp+glyph inset vs old 24dp start).
+- Feed: [Asura Scans▼][Popular][Latest] row + genre chips render;
+  customize sheet opens (Display/Sources/Default listing groups);
+  content-desc actions Manage sources/Settings/Add feed intact.
+- Library: compact grid + scrim-backed titles + unread badges render
+  (Villain To Kill 243 etc.).
+- Recent: Continue chips (Last read/Alphabetically/Downloaded only)
+  + rows render. Browse: sources list renders. More: General/
+  Studies/Library/Settings cards intact.
+- Session: 0 FATAL EXCEPTION / 0 NetworkOnMainThreadException.
+- Device quirks: LeakCanary LeakLauncherActivity intercepted 2
+  relaunches (known #13) — dismissed; NotificationShade + systemui
+  overlays stole focus twice — cleared; stale uiautomator dumps ×2 —
+  re-dump pattern; swipes eaten once by overlay on Dictionaries
+  scroll (top-of-screen target verified; bottom content unchanged
+  code, covered by prior passes).
+
+Docs: ui-implementation-map.md §31 addendum, implementation-roadmap
+§B current-task + §I DS rows + §M history row, phase.md pointer,
+memory.md (this block).
+
+Roadmap state: AnymeX UI = EXECUTED (this batch); Q3 = queued next
+(design pass, U-5); Q4-Q8 HALTED; Liquid Background DEFERRED; true
+blur REJECTED. UNCOMMITTED — user commit decision.
+```

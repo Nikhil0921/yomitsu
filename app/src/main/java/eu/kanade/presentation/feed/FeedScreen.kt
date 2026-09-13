@@ -24,7 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -124,7 +124,7 @@ fun FeedScreen(
                             ),
                             AppBar.Action(
                                 title = stringResource(MR.strings.action_settings),
-                                icon = Icons.Outlined.List,
+                                icon = Icons.Outlined.GridView,
                                 onClick = { showCustomizeDialog = true },
                             ),
                             AppBar.Action(
@@ -552,7 +552,7 @@ private fun FeedCustomizeDialog(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = MaterialTheme.padding.medium),
-            verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Display: grid columns + grid style
             PreferenceGroupCard(title = stringResource(MR.strings.action_display)) {

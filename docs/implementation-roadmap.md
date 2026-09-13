@@ -53,6 +53,16 @@ There is exactly ONE.
 CURRENT AUTHORIZED TASK:
     NONE — awaiting user authorization.
 
+    ANYMEX UI MODERNIZATION MICRO-BATCH 2026-09-13 (user-authorized,
+    post-v0.5.4.1): smallest safe visual-correction set EXECUTED +
+    device-verified — DS-01 (SettingsDictionaryScreen OCR-results group
+    → PreferenceGroupCard), DS-03 (SettingsSearch 24/14dp → 16/12dp
+    token rhythm), DS-06 (Feed customize icon List → GridView), DS-02
+    (cover scrim literal → colorScheme.scrim token), FeedCustomizeDialog
+    card gaps 8→12dp grouped rhythm. UNCOMMITTED — awaiting user commit
+    decision. Scope locks held: no Liquid Background, no blur, no IA
+    regroup, no navigation changes, no Q3-Q8, no DB/deps.
+
     MASTER SESSION 2026-09-13 COMMITTED by user (6 commits on b2f1da316:
     345fcb67d, ed368bf6a, 0553a8a78, 81811dcd8, 4f7a9e51b, 64e0103af).
     Q9 a11y + BUG-003/004/005/006/008/009/010 + Tscan Feed fix +
@@ -271,12 +281,12 @@ two-line KEPT; D-09/D-14 NO ACTION; D-15 FUTURE-only.
 
 | DESIGN-ID | Screen/Component | Expected | Actual | Severity | Status |
 |---|---|---|---|---|---|
-| DS-01 | SettingsDictionaryScreen OCR-results group (`:603-623`) | PreferenceGroupCard grouped surface | Loose PreferenceGroupHeader in plain Box — only grouped-settings holdout (outside documented Data/Anki exceptions) | MINOR | Open (fold into next UI batch) |
-| DS-02 | CommonMangaItem.kt:132 | Token colors | `Color(0xAA000000)` cover scrim literal (scrim-family rationale — same family as allowed reader scrims) | MINOR | Open (token-ize or document exception) |
-| DS-03 | SettingsSearchScreen.kt:240 | 16dp token rhythm | 24/14dp literal paddings (only screen-level outlier) | MINOR | Open |
+| DS-01 | SettingsDictionaryScreen OCR-results group (`:603-623`) | PreferenceGroupCard grouped surface | ~~Loose PreferenceGroupHeader in plain Box~~ | MINOR | **RESOLVED 2026-09-13** (AnymeX UI micro-batch): now PreferenceGroupCard; device-verified |
+| DS-02 | CommonMangaItem.kt:132 | Token colors | ~~`Color(0xAA000000)` cover scrim literal~~ → colorScheme.scrim.copy(0.67f) | MINOR | **RESOLVED 2026-09-13** (AnymeX UI micro-batch) |
+| DS-03 | SettingsSearchScreen.kt:240 | 16dp token rhythm | ~~24/14dp literal paddings~~ → 16/12dp | MINOR | **RESOLVED 2026-09-13** (AnymeX UI micro-batch) |
 | DS-04 | RecentTab badge | Badge renders | `RecentTabContent.badgeNumber` dead param — PrimaryTabRow badge never populated | MINOR (dead code) | RM-01 item 4 |
 | DS-05 | ReaderBottomBar.kt:41 | No dead modifiers | `pointerInput(Unit){}` no-op | MINOR (dead code) | RM-01 item 4 |
-| DS-06 | Feed customize AppBar action | Icon/label coherence | List icon paired with "Settings" title | MINOR | Open (cosmetic copy) |
+| DS-06 | Feed customize AppBar action | Icon/label coherence | ~~List icon paired with "Settings" title~~ → GridView icon | MINOR | **RESOLVED 2026-09-13** (AnymeX UI micro-batch) |
 | DS-07 | MoreScreen logo / Dictionary empty states | Token spacing | 32dp isolated literals | MINOR | Documented tolerance |
 
 Typography sweep: ZERO new `.sp` violations (all 9 hits documented exceptions).
@@ -418,5 +428,6 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 **No P0, no P1.** Baseline healthy; all findings are seam polish.
 
 | 2026-09-13 | FEED UI CORRECTION (user-authorized; supersedes stacked-selector layout from master session): removed `All` listing chip from FeedFilterBar + Customize→Default listing; legacy null defaultListing → Popular fallback at prefs-read (no migration; "All sources" source dropdown untouched); compact primary row [Source selector][Popular][Latest] (single Row, horizontalScroll narrow-screen fallback, stable-width selector preserved); removed per-section duplicate source/listing FeedHeader; moved FilterBar into LazyVerticalGrid as first full-span item = natural collapse-on-scroll + return (zero custom scroll machinery); genre chip row preserved below primary row. Files: FeedScreen.kt, FeedScreenModel.kt. Gates green docker (spotlessCheck, testDebugUnitTest + verifySqlDelightMigration 2m59s, :app:assembleDebug 3m26s). Device-verified SM_M066B (debug 720px): row layout bounds (selector y209, Popular y209, Latest y209 — same row), zero `All` nodes, Popular↔Latest single-select with distinct result sets (data matches selection §18), genre Safe toggle off→on changes + restores results, chips honestly follow source filter leaves, collapse on swipe-down + return on swipe-up, Load more appends next page, persistence across force-stop/restart + ManageFeeds roundtrip, legacy empty default_listing → Popular selected, no crash/no NetworkOnMainThread in session logcat. UNCOMMITTED — awaiting user commit decision. | opencode feed-correction session |
+| 2026-09-13 | ANYMEX UI MODERNIZATION MICRO-BATCH (user-authorized post-v0.5.4.1; visual corrections only): DS-01 SettingsDictionaryScreen OCR-results group → PreferenceGroupCard (last grouped-settings holdout); DS-03 SettingsSearch rows 24/14dp → 16/12dp token rhythm; DS-06 Feed customize icon List → GridView; DS-02 compact-grid cover scrim Color(0xAA000000) → colorScheme.scrim.copy(0.67f); FeedCustomizeDialog gaps 8→12dp grouped-card rhythm. 4 files + docs. Reference = AnymeX hierarchy/grouping intent only (no cloning). Liquid/blur/IA-regroup/nav/Q3-Q8 explicitly NOT touched. Gates green docker (spotlessCheck + testDebugUnitTest + verifySqlDelightMigration + assembleDebug, chained 3m15s). Device SM_M066B smoke PASS: Dictionary card renders tonal + rows inside (px band verified), Settings search live w/ 16dp rows, Feed row+chips+customize sheet intact, Library grid + badges render, Recent Continue + Browse sources render, More Studies card intact, 0 FATAL. UNCOMMITTED. | opencode anymex-ui session |
 
 END OF ROADMAP.

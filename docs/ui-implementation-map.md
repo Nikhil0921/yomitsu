@@ -751,3 +751,29 @@ touched files map to open D-items). New surfaces this session:
 - Not implemented (deferred, see roadmap §G): Liquid Mode/Background
   (opaque Scaffolds hide background layers; needs translucent
   containerColor audit — own batch).
+
+### 31. AnymeX UI modernization micro-batch (2026-09-13, post-v0.5.4.1)
+
+User-authorized AnymeX-track visual corrections (smallest safe set;
+reference = hierarchy/spacing/grouping intent only, no pixel cloning):
+
+- DS-01 RESOLVED: SettingsDictionaryScreen OCR-results group was the
+  last grouped-settings holdout (loose PreferenceGroupHeader in plain
+  Box) → now a PreferenceGroupCard like every other settings group
+  (device-verified: tonal card px 34,47,49 vs bg 32,33,37; rows inside).
+- DS-03 RESOLVED: SettingsSearch result rows 24/14dp literal paddings →
+  16/12dp token rhythm matching sibling list rows.
+- DS-06 RESOLVED: Feed customize AppBar action icon List → GridView
+  (icon now matches grid/display purpose).
+- DS-02 RESOLVED: MangaCompactGridItem CoverTextOverlay scrim literal
+  Color(0xAA000000) → colorScheme.scrim.copy(alpha=0.67f) (token; scrim
+  family per reader overlay precedent; visual parity with old 0xAA).
+- FeedCustomizeDialog card gaps: spacedBy(small=8dp) → 12dp frozen
+  grouped-card rhythm (matches MoreScreen/PreferenceScreen/reader
+  settings dialogs).
+
+Not implemented (per authorization): Liquid Background/Mode (DEFERRED),
+grain/OLED/poster-color, true blur (REJECTED), AnymeX settings IA regroup,
+navigation changes, Q3 recursive lookup, Q4-Q8. DS-07 32dp empty-state
+insets remain documented tolerance. Gates green + device smoke PASS
+2026-09-13 (see memory.md block).

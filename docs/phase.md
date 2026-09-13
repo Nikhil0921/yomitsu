@@ -5,7 +5,14 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **v0.5.4.1 RELEASED 2026-09-13 (user-authorized).
+Current phase pointer: **ANYMEX UI MODERNIZATION MICRO-BATCH EXECUTED
+  2026-09-13 (user-authorized, post-v0.5.4.1) — 5 visual corrections
+  (DS-01/02/03/06 + FeedCustomizeDialog 12dp rhythm), gates green,
+  device smoke PASS SM_M066B, UNCOMMITTED awaiting user review/commit.
+  Scope locks held: Liquid DEFERRED, blur REJECTED, IA regroup NO,
+  nav NO, Q3-Q8 HALTED. Next per roadmap queue: Q3 recursive
+  dictionary lookup design pass (U-5).**
+  Prior: **v0.5.4.1 RELEASED 2026-09-13 (user-authorized).
   Commit 2af00b105 (version bump 0.5.4.1/vc31 + CHANGELOG + docs), tag
   v0.5.4.1 pushed, GitHub Latest release published with 5 ABI APKs
   (release build 12m54s green, ML models packaged, metadata verified

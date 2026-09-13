@@ -129,7 +129,7 @@ private fun BoxScope.CoverTextOverlay(
             .background(
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    1f to Color(0xAA000000),
+                    1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.67f),
                 ),
             )
             .fillMaxHeight(0.33f)

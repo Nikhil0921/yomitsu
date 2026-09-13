@@ -239,7 +239,7 @@ private fun SearchResult(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onItemClick(item) }
-                                .padding(horizontal = 24.dp, vertical = 14.dp),
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             Text(
                                 text = item.title,
