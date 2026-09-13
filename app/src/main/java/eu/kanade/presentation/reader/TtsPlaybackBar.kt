@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.ui.reader.tts.TtsError
@@ -223,12 +225,17 @@ private fun PlaybackContent(
                 expanded = speedMenuExpanded,
                 onDismissRequest = { speedMenuExpanded = false },
             ) {
+                val selectedLabel = stringResource(MR.strings.selected)
+                val notSelectedLabel = stringResource(MR.strings.not_selected)
                 SPEED_CHOICES.forEach { speed ->
                     DropdownMenuItem(
                         text = { Text("${formatSpeed(speed)}x") },
                         onClick = {
                             speedMenuExpanded = false
                             onSetSpeechRate(speed)
+                        },
+                        modifier = Modifier.semantics {
+                            stateDescription = if (speed == speechRate) selectedLabel else notSelectedLabel
                         },
                         trailingIcon = if (speed == speechRate) {
                             {

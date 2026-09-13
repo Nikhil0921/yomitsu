@@ -30,7 +30,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.NonRestartableComposable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +49,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.components.UpIcon
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.util.Screen
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -166,8 +166,11 @@ private fun SearchResult(
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
 
     val index = getIndex()
-    val result by produceState<List<SearchResultItem>?>(initialValue = null, searchKey) {
-        value = index.asSequence()
+    // Computed synchronously per keystroke: the producer-per-key version left a
+    // blank Crossfade frame between query and results (BUG-010). The chain is
+    // pure filtering over the in-memory index; no IO.
+    val result = remember(searchKey, isLtr) {
+        index.asSequence()
             .flatMap { settingsData ->
                 settingsData.contents.asSequence()
                     // Only search from enabled prefs and one with valid title
@@ -218,7 +221,6 @@ private fun SearchResult(
         label = "results",
     ) {
         when {
-            it == null -> {}
             it.isEmpty() -> {
                 EmptyScreen(stringResource(MR.strings.no_results_found))
             }
@@ -297,6 +299,16 @@ private val unindexedSettingScreens = listOf(
         // Subtitle is search corpus only (results show title + breadcrumb);
         // covers the singular "dictionary" query the plural title misses.
         subtitleRes = MR.strings.label_dictionary,
+    ),
+    UnindexedSettingScreen(
+        screen = SettingsReaderToolbarScreen(),
+        titleRes = MR.strings.pref_reader_customize_toolbar,
+        subtitleRes = MR.strings.pref_reader_customize_toolbar_summary,
+    ),
+    UnindexedSettingScreen(
+        screen = AppLanguageScreen(),
+        titleRes = MR.strings.pref_app_language,
+        subtitleRes = null,
     ),
 )
 

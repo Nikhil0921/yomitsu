@@ -16,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import tachiyomi.domain.category.model.Category
 import tachiyomi.i18n.MR
@@ -27,13 +30,30 @@ fun ReorderableCollectionItemScope.CategoryListItem(
     category: Category,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onMove: (offset: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val moveUpLabel = stringResource(MR.strings.action_move_up)
+    val moveDownLabel = stringResource(MR.strings.action_move_down)
     ElevatedCard(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onRename)
+                // Screen-reader reorder support: drag handle is touch-only,
+                // so expose move actions on the whole row.
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(moveUpLabel) {
+                            onMove(-1)
+                            true
+                        },
+                        CustomAccessibilityAction(moveDownLabel) {
+                            onMove(1)
+                            true
+                        },
+                    )
+                }
                 .padding(vertical = MaterialTheme.padding.small)
                 .padding(
                     start = MaterialTheme.padding.small,

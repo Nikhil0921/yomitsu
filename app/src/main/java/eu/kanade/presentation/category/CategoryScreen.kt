@@ -109,11 +109,20 @@ private fun CategoryContent(
             key = { category -> category.key },
         ) { category ->
             ReorderableItem(reorderableState, category.key) {
+                val index = categoriesState.indexOf(category)
                 CategoryListItem(
                     modifier = Modifier.animateItem(),
                     category = category,
                     onRename = { onClickRename(category) },
                     onDelete = { onClickDelete(category) },
+                    onMove = { offset ->
+                        val target = (index + offset).coerceIn(categoriesState.indices)
+                        if (target != index) {
+                            val item = categoriesState.removeAt(index)
+                            categoriesState.add(target, item)
+                            onChangeOrder(item, target)
+                        }
+                    },
                 )
             }
         }

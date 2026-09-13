@@ -273,6 +273,10 @@ fun BaseSliderItem(
             },
             valueRange = valueRange,
             steps = steps,
+            // Meaningful value for screen readers instead of bare percent.
+            modifier = Modifier.semantics {
+                stateDescription = valueString
+            },
         )
     }
 }
