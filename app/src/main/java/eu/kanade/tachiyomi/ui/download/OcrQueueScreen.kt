@@ -7,8 +7,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -45,7 +47,7 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.more.settings.widget.EditTextPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.InfoWidget
 import eu.kanade.presentation.more.settings.widget.ListPreferenceWidget
-import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
+import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.databinding.DownloadListBinding
@@ -186,76 +188,79 @@ object OcrQueueScreen : Screen() {
                     .padding(contentPadding)
                     .nestedScroll(nestedScrollConnection),
             ) {
-                PreferenceGroupHeader(title = stringResource(MR.strings.label_settings))
-                ListPreferenceWidget(
-                    value = ocrModel,
-                    title = stringResource(MR.strings.pref_ocr_model),
-                    subtitle = stringResource(ocrModel.titleRes),
-                    icon = null,
-                    entries = mapOf(
-                        OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
-                        OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
-                        OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
-                        OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
-                    ),
-                    onValueChange = ocrModelPreference::set,
-                )
-                if (ocrModel == OcrModel.OWOCR) {
-                    EditTextPreferenceWidget(
-                        title = stringResource(MR.strings.pref_owocr_address),
-                        subtitle = stringResource(MR.strings.pref_owocr_address_summary),
+                PreferenceGroupCard(title = stringResource(MR.strings.label_settings)) {
+                    ListPreferenceWidget(
+                        value = ocrModel,
+                        title = stringResource(MR.strings.pref_ocr_model),
+                        subtitle = stringResource(ocrModel.titleRes),
                         icon = null,
-                        value = owocrAddress,
-                        onConfirm = {
-                            owocrAddressPreference.set(it)
-                            true
-                        },
+                        entries = mapOf(
+                            OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
+                            OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
+                            OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
+                            OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
+                        ),
+                        onValueChange = ocrModelPreference::set,
                     )
-                    InfoWidget(text = stringResource(MR.strings.pref_owocr_address_note))
+                    if (ocrModel == OcrModel.OWOCR) {
+                        EditTextPreferenceWidget(
+                            title = stringResource(MR.strings.pref_owocr_address),
+                            subtitle = stringResource(MR.strings.pref_owocr_address_summary),
+                            icon = null,
+                            value = owocrAddress,
+                            onConfirm = {
+                                owocrAddressPreference.set(it)
+                                true
+                            },
+                        )
+                        InfoWidget(text = stringResource(MR.strings.pref_owocr_address_note))
+                    }
+                    SwitchPreferenceWidget(
+                        checked = autoOcrOnDownload,
+                        title = stringResource(MR.strings.pref_auto_ocr_on_download),
+                        onCheckedChanged = autoOcrOnDownloadPreference::set,
+                    )
+                    SwitchPreferenceWidget(
+                        checked = useFallbackModels,
+                        title = stringResource(MR.strings.pref_use_fallback_models),
+                        subtitle = stringResource(MR.strings.pref_use_fallback_models_summary),
+                        onCheckedChanged = useFallbackModelsPreference::set,
+                    )
                 }
-                SwitchPreferenceWidget(
-                    checked = autoOcrOnDownload,
-                    title = stringResource(MR.strings.pref_auto_ocr_on_download),
-                    onCheckedChanged = autoOcrOnDownloadPreference::set,
-                )
-                SwitchPreferenceWidget(
-                    checked = useFallbackModels,
-                    title = stringResource(MR.strings.pref_use_fallback_models),
-                    subtitle = stringResource(MR.strings.pref_use_fallback_models_summary),
-                    onCheckedChanged = useFallbackModelsPreference::set,
-                )
 
-                PreferenceGroupHeader(title = stringResource(MR.strings.ocr_queue_header))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                ) {
-                    if (!hasQueue) {
-                        EmptyScreen(
-                            message = stringResource(MR.strings.ocr_queue_empty),
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { context ->
-                                screenModel.controllerBinding =
-                                    DownloadListBinding.inflate(LayoutInflater.from(context))
-                                screenModel.adapter = OcrAdapter(screenModel.listener)
-                                screenModel.controllerBinding.root.adapter = screenModel.adapter
-                                screenModel.adapter?.isHandleDragEnabled = true
-                                screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(context)
+                PreferenceGroupCard(title = stringResource(MR.strings.ocr_queue_header)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    ) {
+                        if (!hasQueue) {
+                            EmptyScreen(
+                                message = stringResource(MR.strings.ocr_queue_empty),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { context ->
+                                    screenModel.controllerBinding =
+                                        DownloadListBinding.inflate(LayoutInflater.from(context))
+                                    screenModel.adapter = OcrAdapter(screenModel.listener)
+                                    screenModel.controllerBinding.root.adapter = screenModel.adapter
+                                    screenModel.adapter?.isHandleDragEnabled = true
+                                    screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(context)
 
-                                ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
+                                    ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
 
-                                screenModel.controllerBinding.root
-                            },
-                            update = {
-                                screenModel.adapter?.updateDataSet(state.items)
-                            },
-                        )
+                                    screenModel.controllerBinding.root
+                                },
+                                update = {
+                                    screenModel.adapter?.updateDataSet(state.items)
+                                },
+                            )
+                        }
                     }
                 }
             }

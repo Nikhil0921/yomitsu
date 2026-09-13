@@ -3,6 +3,7 @@ package eu.kanade.presentation.updates
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,7 +76,25 @@ fun UpdateScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading -> LoadingScreen()
-            state.items.isEmpty() -> EmptyScreen(stringRes = MR.strings.information_no_recent)
+            // Filtered-to-empty still shows the controls so the user can
+            // reach the filter sheet and unfilter (no dead-end empty state).
+            state.items.isEmpty() -> Column {
+                UpdatesControls(
+                    selectionMode = state.selectionMode,
+                    selectedCount = state.selected.size,
+                    hasActiveFilters = hasActiveFilters,
+                    onFilterClicked = onFilterClicked,
+                    onCalendarClicked = onCalendarClicked,
+                    onUpdateLibrary = onUpdateLibrary,
+                    onSelectAll = { onSelectAll(true) },
+                    onInvertSelection = onInvertSelection,
+                    onCancelActionMode = { onSelectAll(false) },
+                )
+                EmptyScreen(
+                    stringRes = MR.strings.information_no_recent,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             else -> {
                 val scope = rememberCoroutineScope()
                 var isRefreshing by remember { mutableStateOf(false) }

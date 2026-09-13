@@ -85,34 +85,9 @@ fun MoreScreen(
             }
             item { Spacer(modifier = Modifier.height(12.dp)) }
             item {
-                PreferenceGroupCard(title = stringResource(MR.strings.pref_category_library)) {
-                    val downloadQueueState = downloadQueueStateProvider()
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.label_download_queue),
-                        subtitle = when (downloadQueueState) {
-                            DownloadQueueState.Stopped -> null
-                            is DownloadQueueState.Paused -> {
-                                val pending = downloadQueueState.pending
-                                if (pending == 0) {
-                                    stringResource(MR.strings.paused)
-                                } else {
-                                    "${stringResource(MR.strings.paused)} • ${
-                                        pluralStringResource(
-                                            MR.plurals.download_queue_summary,
-                                            count = pending,
-                                            pending,
-                                        )
-                                    }"
-                                }
-                            }
-                            is DownloadQueueState.Downloading -> {
-                                val pending = downloadQueueState.pending
-                                pluralStringResource(MR.plurals.download_queue_summary, count = pending, pending)
-                            }
-                        },
-                        icon = Icons.Outlined.GetApp,
-                        onPreferenceClick = onClickDownloadQueue,
-                    )
+                // Studies: the language-learning cluster (OCR text
+                // recognition + dictionary tools) grouped on one surface.
+                PreferenceGroupCard(title = stringResource(MR.strings.label_studies)) {
                     val ocrQueueState = ocrQueueStateProvider()
                     TextPreferenceWidget(
                         title = stringResource(MR.strings.label_text_recognition),
@@ -141,6 +116,48 @@ fun MoreScreen(
                         onPreferenceClick = onClickOcrQueue,
                     )
                     TextPreferenceWidget(
+                        title = stringResource(MR.strings.label_dictionary),
+                        icon = Icons.AutoMirrored.Outlined.MenuBook,
+                        onPreferenceClick = onClickDictionaryLookup,
+                    )
+                    TextPreferenceWidget(
+                        title = stringResource(MR.strings.pref_category_dictionaries),
+                        icon = Icons.AutoMirrored.Outlined.LibraryBooks,
+                        onPreferenceClick = onClickDictionary,
+                    )
+                }
+            }
+            item { Spacer(modifier = Modifier.height(12.dp)) }
+            item {
+                PreferenceGroupCard(title = stringResource(MR.strings.pref_category_library)) {
+                    val downloadQueueState = downloadQueueStateProvider()
+                    TextPreferenceWidget(
+                        title = stringResource(MR.strings.label_download_queue),
+                        subtitle = when (downloadQueueState) {
+                            DownloadQueueState.Stopped -> null
+                            is DownloadQueueState.Paused -> {
+                                val pending = downloadQueueState.pending
+                                if (pending == 0) {
+                                    stringResource(MR.strings.paused)
+                                } else {
+                                    "${stringResource(MR.strings.paused)} • ${
+                                        pluralStringResource(
+                                            MR.plurals.download_queue_summary,
+                                            count = pending,
+                                            pending,
+                                        )
+                                    }"
+                                }
+                            }
+                            is DownloadQueueState.Downloading -> {
+                                val pending = downloadQueueState.pending
+                                pluralStringResource(MR.plurals.download_queue_summary, count = pending, pending)
+                            }
+                        },
+                        icon = Icons.Outlined.GetApp,
+                        onPreferenceClick = onClickDownloadQueue,
+                    )
+                    TextPreferenceWidget(
                         title = stringResource(MR.strings.categories),
                         icon = Icons.AutoMirrored.Outlined.Label,
                         onPreferenceClick = onClickCategories,
@@ -154,16 +171,6 @@ fun MoreScreen(
                         title = stringResource(MR.strings.label_data_storage),
                         icon = Icons.Outlined.Storage,
                         onPreferenceClick = onClickDataAndStorage,
-                    )
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.label_dictionary),
-                        icon = Icons.AutoMirrored.Outlined.MenuBook,
-                        onPreferenceClick = onClickDictionaryLookup,
-                    )
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.pref_category_dictionaries),
-                        icon = Icons.AutoMirrored.Outlined.LibraryBooks,
-                        onPreferenceClick = onClickDictionary,
                     )
                 }
             }
