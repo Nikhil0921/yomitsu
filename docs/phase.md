@@ -5,23 +5,29 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **MASTER SESSION 2026-09-13 COMPLETE — code +
-  gates green, UNCOMMITTED, device verification PENDING. Scope: Q9 a11y
-  batch + bug fixes BUG-003/004/005/006/008/009/010 (BUG-007 verified
-  unreachable) + Tscan Feed NetworkOnMainThread fix (withIOContext) +
-  OCR/TTS latency (ChapterCache reuse in OcrPageSourceResolver) + Feed
-  source-supported genre filtering (reuses public Q2 helpers) + selector
-  spacing + AnymeX-inspired micro-passes (Studies card, grouped
-  OcrQueue, Updates empty-state controls, MangaNotes shapes.small) +
-  Liquid Mode/Background DESIGNED+DEFERRED (roadmap §G). Q3–Q8 HARD
-  HALTED by user. Gates green: spotlessCheck + testDebugUnitTest +
-  verifySqlDelightMigration + :app:assembleDebug (docker, JDK17, -Xmx4g).
-  Next: §28 device matrix + OCR/TTS timing evidence → §33 final report
-  → user commit decision.**
+Current phase pointer: **FEED UI CORRECTION 2026-09-13 COMPLETE — code +
+  gates green + DEVICE-VERIFIED, UNCOMMITTED awaiting user commit decision.
+  Scope (user-authorized, supersedes stacked-selector layout): `All`
+  listing chip removed from Feed + Customize→Default listing; legacy null
+  defaultListing → Popular fallback at read (no migration); compact
+  [Source][Popular][Latest] primary row (horizontalScroll narrow fallback,
+  stable-width selector); duplicate per-section source/listing header
+  removed; FilterBar moved into grid = collapse-on-scroll/return;
+  genre chip row preserved. Files: FeedScreen.kt, FeedScreenModel.kt.
+  Gates green (docker JDK17 -Xmx4g: spotlessCheck, testDebugUnitTest,
+  verifySqlDelightMigration 2m59s, :app:assembleDebug 3m26s). Device
+  SM_M066B: full §30 matrix PASS (layout, no-All, single-select data
+  match, genre roundtrip, collapse/return, load-more, persistence,
+  legacy fallback, Manage Feeds intact).**
+  Prior: MASTER SESSION 2026-09-13 COMMITTED (6 commits 345fcb67d..
+  64e0103af on b2f1da316, user-authorized): Q9 a11y batch + bug fixes
+  BUG-003/004/005/006/008/009/010 (BUG-007 verified unreachable) +
+  Tscan Feed fix + OCR/TTS ChapterCache latency + Feed genre filtering +
+  AnymeX micro-passes + Liquid DESIGNED+DEFERRED. Q3–Q8 HARD HALTED.
   Prior: Q2 GENRE-CHIP SEARCH COMPLETE 2026-09-12
   (implementation + gates green + device Q2-01..09 PASS on SM_M066B;
-  UNCOMMITTED awaiting user commit decision — same precedent as RM-01/tone
-  U-2). Genre chips = M3 FilterChip row in BrowseSourceScreen derived from
+  committed in master session set as 345fcb67d). Genre chips = M3
+  FilterChip row in BrowseSourceScreen derived from
   the source's own Filter leaves (TriState/CheckBox); toggle re-searches
   via existing search(filters=); sources without such leaves honestly show
   no row. Multi-genre = source semantics.

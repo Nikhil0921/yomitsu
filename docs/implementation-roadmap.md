@@ -53,23 +53,28 @@ There is exactly ONE.
 CURRENT AUTHORIZED TASK:
     NONE — awaiting user authorization.
 
-    MASTER SESSION 2026-09-13 COMPLETED, UNCOMMITTED: Q9 a11y batch +
-    bug fixes (BUG-003/004/005/006/008/009/010 fixed, BUG-007 verified
-    unreachable = no action) + Tscan Feed NetworkOnMainThread fix +
-    OCR/TTS latency (ChapterCache reuse in OcrPageSourceResolver) +
-    Feed source-supported genre filtering (Q2 precedent, chips reusing
-    public BrowseSourceScreenModel helpers) + Feed selector spacing +
-    AnymeX-inspired UI micro-passes (Studies card, grouped OcrQueue,
-    Updates empty-state controls, MangaNotes shapes.small) + Feed
-    selector two-row spacing. Gates green (spotlessCheck +
-    testDebugUnitTest + verifySqlDelightMigration + assembleDebug).
-    DEVICE-VERIFIED 2026-09-13 (SM_M066B): Tscan Feed 0
-    NetworkOnMainThread + section renders; genre filter on/off live;
-    cached OCR startup 1625ms vs 15870ms uncached (10×, BUG-004 cache
-    predicate live); BUG-006/009 live; Studies card + OcrQueue groups +
-    Browse Q2 chips regression PASS; BUG-003 partial (code-verified,
-    sequence not isolated). Evidence .device-pass/master-session-*.log.
-    Awaiting user commit decision, same as U-2 precedent.
+    MASTER SESSION 2026-09-13 COMMITTED by user (6 commits on b2f1da316:
+    345fcb67d, ed368bf6a, 0553a8a78, 81811dcd8, 4f7a9e51b, 64e0103af).
+    Q9 a11y + BUG-003/004/005/006/008/009/010 + Tscan Feed fix +
+    OCR/TTS ChapterCache latency + Feed genre filtering + AnymeX
+    micro-passes — all executed + device-verified (see §M history).
+
+    FEED UI CORRECTION 2026-09-13 (user-authorized follow-up,
+    supersedes stacked-selector layout): (1) `All` listing chip removed
+    from FeedFilterBar + Customize→Default listing (Popular/Latest
+    only); legacy null defaultListing falls back to Popular at read
+    (FeedScreenModel prefs collect, no migration, "All sources" dropdown
+    untouched). (2) Compact single primary row: source selector left +
+    Popular/Latest chips right (horizontalScroll for narrow screens).
+    (3) Per-section duplicate source/listing header removed. (4) FilterBar
+    moved INTO Lazy grid as first full-span item = natural collapse-on-
+    scroll + return-on-scroll-up, no nested containers. (5) Genre chip
+    row preserved below primary row. Gates green (docker JDK17 -Xmx4g:
+    spotlessCheck, testDebugUnitTest, verifySqlDelightMigration,
+    :app:assembleDebug). Device-verified SM_M066B: compact layout, no
+    All, single-select + data match, genre toggle roundtrip, collapse/
+    return, load-more, persistence across restart, legacy fallback,
+    Manage Feeds intact. UNCOMMITTED — awaiting user commit decision.
 
     Q3–Q8 HARD HALTED by user (2026-09-13): no work on them. Q9 was the
     only authorized queue item this session.
@@ -98,6 +103,8 @@ CURRENT AUTHORIZED TASK:
 | L-15 | 2026-09-11 | Batch 7: reader toolbar customization (drag-reorder, 13 tests) | 9126e20dc | USER-VERIFIED on device | toolbar-customize-test.log |
 | L-16 | 2026-09-11/12 | Artwork-reactive reader tray (stream-wait fix + 20%/2.5× tuning) | 0434d07a1 (in v0.5.4) | gates green + device-scripted verify | /tmp/opencode/toned-menu-v2.png etc. |
 | L-17 | 2026-09-12 | Q2 genre-chip search (BrowseSourceScreen chip row over source Filter leaves + 10 unit tests) | UNCOMMITTED (2 src files + 1 test file + docs) | gates green; device Q2-01..09 PASS on SM_M066B (build 0.5.4-8281) | .device-pass/q2/ dumps + this §M |
+| L-18 | 2026-09-13 | Master session: Q9 a11y + BUG-003..010 + Tscan fix + OCR/TTS ChapterCache + Feed genre chips + AnymeX micro-passes | 345fcb67d..64e0103af (6 commits, user-authorized) | gates green + device-verified | §M history 2026-09-13; .device-pass/master-session-*.log |
+| L-19 | 2026-09-13 | Feed UI correction: remove `All` listing, compact [Source][Popular][Latest] row, remove duplicate section header, collapse-on-scroll (filter bar as grid item), legacy null→Popular fallback | UNCOMMITTED (FeedScreen.kt + FeedScreenModel.kt + docs) | gates green + device-verified (matrix §M) | uiautomator dumps feed-*.xml session 09-13 |
 
 ---
 
@@ -409,5 +416,7 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 | BUG-012 | P4 | Docs | Known-issue #2 (dual setComposeContent) stale — code has ONE composition block | ReaderActivity.kt:321-323,606 grep clean; memory.md:2478-2482 | **FIXED (RM-01)** — memory + architecture + next-phase-plan corrected |
 
 **No P0, no P1.** Baseline healthy; all findings are seam polish.
+
+| 2026-09-13 | FEED UI CORRECTION (user-authorized; supersedes stacked-selector layout from master session): removed `All` listing chip from FeedFilterBar + Customize→Default listing; legacy null defaultListing → Popular fallback at prefs-read (no migration; "All sources" source dropdown untouched); compact primary row [Source selector][Popular][Latest] (single Row, horizontalScroll narrow-screen fallback, stable-width selector preserved); removed per-section duplicate source/listing FeedHeader; moved FilterBar into LazyVerticalGrid as first full-span item = natural collapse-on-scroll + return (zero custom scroll machinery); genre chip row preserved below primary row. Files: FeedScreen.kt, FeedScreenModel.kt. Gates green docker (spotlessCheck, testDebugUnitTest + verifySqlDelightMigration 2m59s, :app:assembleDebug 3m26s). Device-verified SM_M066B (debug 720px): row layout bounds (selector y209, Popular y209, Latest y209 — same row), zero `All` nodes, Popular↔Latest single-select with distinct result sets (data matches selection §18), genre Safe toggle off→on changes + restores results, chips honestly follow source filter leaves, collapse on swipe-down + return on swipe-up, Load more appends next page, persistence across force-stop/restart + ManageFeeds roundtrip, legacy empty default_listing → Popular selected, no crash/no NetworkOnMainThread in session logcat. UNCOMMITTED — awaiting user commit decision. | opencode feed-correction session |
 
 END OF ROADMAP.

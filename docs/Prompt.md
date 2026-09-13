@@ -1,1215 +1,1765 @@
-# YOMITSU — COMPLETE UI AUDIT, DESIGN MAPPING & IMPLEMENTATION BLUEPRINT
+# YOMITSU MASTER IMPLEMENTATION PROMPT
+## Q9 Finalization + Feed UI Correction + Verification
 
-## ROLE
+You are continuing development of **Yomitsu**, the user's Android manga-reader fork.
 
-You are acting as a senior Android UI/UX architect, product designer,
-information-architecture specialist, and implementation-planning engineer.
+This is an **implementation session**, not a brainstorming session.
 
-You are NOT being asked to immediately redesign or implement the UI.
+Operate with:
 
-Your first responsibility is to fully understand the CURRENT Yomitsu
-application, audit it, map it, identify inconsistencies, and produce an
-implementation-grade UI design blueprint.
-
-The purpose of this task is to prevent speculative UI implementation,
-incorrect feature placement, inconsistent typography/spacing, accidental
-architecture changes, and another UI regression cycle.
-
-DO NOT start by implementing glassmorphism, blur, new cards, new navigation,
-new settings groups, or any other visual feature.
-
-FIRST AUDIT.
-THEN MAP.
-THEN DESIGN.
-THEN SPECIFY IMPLEMENTATION.
-IMPLEMENTATION HAPPENS ONLY AFTER THE BLUEPRINT IS REVIEWED/APPROVED.
+- **Audit first**
+- **Smallest safe diff**
+- **Root-cause fixes**
+- **No speculative refactors**
+- **No architecture churn**
+- **No silent scope expansion**
+- **Test everything deterministic**
+- **Device-verify before declaring success**
+- **Do not commit/tag/release without explicit user authorization**
 
 ---
 
-# 1. REQUIRED DOCUMENTATION CONTEXT
+# 1. CURRENT PROJECT STATE
 
-Before doing anything else, read the following documents completely:
+Current branch:
 
-- docs/prd.md
-- docs/architecture.md
-- docs/rules.md
-- docs/phase.md
-- docs/design.md
-- docs/design-audit.md
-- docs/memory.md
-- docs/branding.md, if present
+```text
+main
+```
 
-Also inspect the relevant source code, shared presentation components,
-theme implementation, settings infrastructure, navigation implementation,
-reader UI, Feed UI, Recent UI, More UI, and all currently relevant
-screens.
+Current baseline reported:
 
-Treat these documents as the existing source of truth.
+```text
+b2f1da316
+```
 
-Do not silently replace documented project decisions with generic Android
-or Material recommendations.
+This is already past the `v0.5.4` tag in documentation.
 
-If a conflict exists between documents and actual source code:
+There are **uncommitted user changes in the tree**.
 
-1. Identify the conflict.
-2. Record it explicitly.
-3. Determine whether the source or documentation represents the current
-   implementation.
-4. Do NOT silently modify either one during the audit.
-5. Record the required resolution in the audit/map.
+Treat those changes as valuable existing work.
+
+Do NOT reset, discard, clean, stash, squash, or overwrite them unless explicitly authorized.
 
 ---
 
-# 2. PRIMARY OBJECTIVE
-
-Create a complete, implementation-grade UI/UX map of the CURRENT Yomitsu
-application and the APPROVED FUTURE UI.
-
-The result must function like a professional designer-to-developer handoff.
-
-Think of this as:
-
-DESIGN SYSTEM
-+
-SCREEN INVENTORY
-+
-FIGMA-STYLE SCREEN SPECIFICATION
-+
-INFORMATION ARCHITECTURE
-+
-COMPONENT MAP
-+
-FEATURE LOCATION MAP
-+
-RESPONSIVE SPECIFICATION
-+
-IMPLEMENTATION CONTRACT
-+
-REGRESSION SAFETY PLAN
-
-The final documentation must make it possible for another agent to
-implement the approved design without having to guess:
-
-- where something belongs
-- what component should be used
-- what surface it belongs to
-- what typography role it uses
-- how much spacing it requires
-- whether it should be grouped
-- whether it should be frosted
-- whether it should remain solid
-- how it behaves on phone/tablet/landscape
-- what existing component should be reused
-- what source file owns the UI
-- what business logic must remain untouched
-
----
-
-# 3. ABSOLUTE PROCESS RULE
-
-DO NOT IMPLEMENT THE REDESIGN DURING THE AUDIT.
-
-The first pass is READ-ONLY.
-
-Do not modify application source files while building the map.
-
-Do not "fix something quickly" because it appears obvious.
-
-Do not refactor unrelated code.
-
-Do not create speculative UI components.
-
-Do not introduce a new design system.
-
-Do not replace existing Material 3 components without documenting why.
-
-Do not assume that a previous device verification means the current
-behavior is correct.
-
-The current source code and current behavior must be rechecked.
-
----
-
-# 4. AUDIT THE ENTIRE CURRENT UI
-
-Build a complete screen inventory.
-
-At minimum inspect:
-
-## Primary navigation
-
-- Library
-- Recent
-- Feed
-- Browse
-- More
-
-Also inspect:
-
-- bottom navigation
-- selected/unselected states
-- labels
-- icons
-- badges
-- reselect behavior
-- navigation transitions
-- navigation spacing
-- navigation inset handling
-
-Do not assume the current five-tab implementation is visually perfect
-just because the information architecture is intentional.
-
----
-
-# 5. RECENT SCREEN AUDIT
-
-The Recent screen requires special attention because it was introduced
-and modified recently.
-
-Audit:
-
-- Recent AppBar
-- Continue tab
-- History tab
-- Updates tab
-- PrimaryTabRow
-- selected indicator
-- tab typography
-- tab horizontal spacing
-- tab height
-- tab baseline alignment
-- top inset
-- distance between AppBar and tabs
-- distance between tabs and content
-- empty states
-- filters
-- row spacing
-- history rows
-- update rows
-- badges
-- swipe behavior
-- tab-tap behavior
-- title duplication
-- nested headers
-
-IMPORTANT:
-
-There have already been previous fixes for Recent layout overlap and
-tab positioning.
-
-Do not assume those fixes guarantee perfect visual consistency.
-
-Re-audit the current implementation.
-
-Also investigate the user's reported problem with the recently introduced
-tab/screen surfaces.
-
-If the user-referred "Create" tab/screen exists in the current source,
-identify it precisely and include it in the audit.
-
-If no such destination exists, do not invent one. Record that the user's
-reference could correspond to another recently-created screen.
-
----
-
-# 6. TYPOGRAPHY AUDIT
-
-This is a REQUIRED audit category.
-
-Do not only inspect colors and cards.
-
-Audit every important screen for typography consistency.
-
-For each text element determine:
-
-- actual typography role
-- intended typography role
-- font family
-- font size
-- font weight
-- line height
-- letter spacing if explicitly configured
-- max lines
-- ellipsis behavior
-- baseline alignment
-- text-to-icon alignment
-- title/subtitle hierarchy
-- section-header hierarchy
-- caption/meta hierarchy
-
-Look specifically for:
-
-- hard-coded sp values
-- unnecessary custom TextStyle values
-- inconsistent Material typography roles
-- inconsistent line spacing
-- text appearing too compressed
-- text appearing too loose
-- different screens using different title sizes for equivalent roles
-- section headers with inconsistent size/weight
-- supporting text using the wrong hierarchy
-- metadata that is visually stronger than primary content
-- text that wraps differently because of inconsistent width constraints
-
-Do NOT change typography during the audit.
-
-Record the discrepancy.
-
-Every typography discrepancy must be classified:
-
-- PASS
-- MINOR
-- MEDIUM
-- MAJOR
-
----
-
-# 7. SPACING AUDIT
-
-Perform a systematic spacing audit.
-
-Inspect:
-
-- screen horizontal margins
-- screen vertical padding
-- AppBar-to-content spacing
-- section-to-section spacing
-- card-to-card spacing
-- row padding
-- icon-to-text spacing
-- text-to-text spacing
-- chip spacing
-- tab spacing
-- bottom-navigation inset
-- dialog spacing
-- sheet spacing
-- reader overlay spacing
-- list item height
-- grid gutters
-- content-to-edge spacing
-
-Use the existing design system as the baseline.
-
-Do NOT invent a second spacing system.
-
-Check whether the current implementation consistently follows the existing
-documented metrics.
-
-Look especially for:
-
-- 8dp in one place and 12dp in an equivalent place
-- 12dp versus 16dp inconsistencies
-- unequal left/right margins
-- visually uneven vertical rhythm
-- content touching card edges
-- unnecessary nested padding
-- double padding
-- missing padding
-- inconsistent group gaps
-- inconsistent chip gaps
-- inconsistent indentation
-
----
-
-# 8. INDENTATION AND ALIGNMENT AUDIT
-
-Audit visual alignment independently from spacing.
-
-Check:
-
-- left edges of section titles
-- left edges of rows
-- icon alignment
-- title alignment
-- subtitle alignment
-- trailing control alignment
-- switch alignment
-- checkbox alignment
-- slider alignment
-- chip alignment
-- card content alignment
-- nested setting indentation
-- dialog content alignment
-- AppBar action alignment
-- bottom navigation alignment
-
-Equivalent components should share equivalent alignment.
-
-If two visually equivalent rows begin at different horizontal positions,
-record it.
-
-If an icon and its text are not vertically centered, record it.
-
-If a section header does not align with the content below it, record it.
-
----
-
-# 9. HEADER AUDIT
-
-Audit every major screen and destination.
-
-For every screen determine:
-
-- Does it need an AppBar?
-- Does it currently have one?
-- Is the title duplicated elsewhere?
-- Is the title missing?
-- Is the title using the correct typography role?
-- Are actions correctly placed?
-- Are actions discoverable?
-- Is there unnecessary nested AppBar/header content?
-- Is there an internal section header where an AppBar title should be used?
-- Is there an AppBar where the screen architecture requires a nested
-  destination title?
-
-Do not normalize all screens into one generic header.
-
-Document the correct header pattern for each screen.
-
----
-
-# 10. FEED AUDIT
-
-The Feed screen requires BOTH a visual audit and a behavioral audit.
-
-Current conceptual model includes:
-
-- source selector
-- listing selector
-- All
-- Popular
-- Latest
-- feed sections
-- grid
-- customization
-- feed management
-- pagination
-
-Audit all of these.
-
-## Source selector
-
-Verify:
-
-- placement
-- alignment
-- chip styling
-- selected state
-- dropdown behavior
-- menu alignment
-- source persistence
-- All Sources behavior
-
-## Listing selector
-
-Verify specifically:
-
-- All
-- Popular
-- Latest
-
-CRITICAL BUG INVESTIGATION:
-
-The user reports that selecting Popular or Latest does not correctly
-replace All.
-
-The user reports that All remains selected and/or both listings remain
-visible.
-
-Do not assume the previous implementation is correct.
-
-Reproduce and inspect the current implementation.
-
-Determine the exact root cause.
-
-Possible areas to investigate include, but are not limited to:
-
-- listingOverride state
-- selected listing state
-- FilterChip selected state
-- FeedScreenModel filtering
-- FeedPreferences default listing
-- recomposition
-- state restoration
-- source/listing combination logic
-- duplicated FeedItem entries
-- initial-state reset
-- persisted preference overriding user selection
-
-Do not guess.
-
-Record:
-
-CURRENT BEHAVIOR
-EXPECTED BEHAVIOR
-ROOT CAUSE
-AFFECTED FILES
-PROPOSED FIX
-REGRESSION RISK
-VERIFICATION PLAN
-
-The desired behavior is:
-
-If Popular is selected:
-→ only Popular listing should be selected/displayed for the active
-source/filter context.
-
-If Latest is selected:
-→ only Latest listing should be selected/displayed.
-
-If All is selected:
-→ All configured listings should be shown.
-
-The selected visual state must match the actual data state.
-
----
-
-# 11. MORE SCREEN TWO-LEVEL INFORMATION ARCHITECTURE AUDIT
-
-The first-level More grouping already exists.
-
-Do NOT treat this as complete.
-
-Audit:
-
-More
-├── General
-├── Library
-└── Settings
-
-Then recursively audit the destinations opened from those groups.
-
-For each destination determine:
-
-- purpose
-- related settings/features
-- whether internal grouping is required
-- existing internal grouping
-- missing grouping
-- unnecessary grouping
-- duplicate grouping
-- wrong grouping
-- correct group name
-- rows belonging to each group
-
-Examples requiring explicit investigation include:
-
-- Text Recognition
-- Dictionary
-- Dictionary settings
-- OCR-related destinations
-- other destinations launched from More
-
-Do not force every screen into cards.
-
-Only group conceptually related settings.
-
-Do not create meaningless categories.
-
-A group should exist because its rows form a coherent conceptual category,
-not merely because there are multiple rows.
-
----
-
-# 12. SETTINGS AUDIT
-
-Audit the entire settings hierarchy.
-
-Check:
-
-- main settings
-- Appearance & Interface
-- Reader
-- Read Aloud & Voice
-- Browse
-- Library
-- Tracking
-- Data/backup/storage
-- OCR/Text Recognition
-- Dictionary
-- other existing settings destinations
-
-For every screen map:
-
-SCREEN
-→ GROUP
-→ ROW
-→ SUBSETTING
-→ RELATED FEATURE
-
-Check for:
-
-- missing internal groups
-- inconsistent group naming
-- duplicated groups
-- groups with one unrelated item
-- loose rows
-- rows that should belong together
-- incorrect placement
-- inconsistent spacing
-- inconsistent typography
-- inconsistent surfaces
-
-Preserve existing working preference keys unless the approved design
-explicitly requires a change.
-
----
-
-# 13. DESIGN SYSTEM AUDIT
-
-Use the existing design.md as the baseline.
-
-Do not invent a new design language.
-
-Audit:
-
-## Typography
-
-Use documented Material 3 roles.
-
-## Colors
-
-Use MaterialTheme.colorScheme tokens.
-
-No feature-specific hard-coded colors unless explicitly justified.
-
-## Surfaces
-
-Maintain the semantic surface hierarchy:
-
-1. Solid surface
-2. Floating chrome
-3. Frosted modal
-
-Do not turn every surface into glass.
-
-## Grouped surfaces
-
-One conceptual settings group = one PreferenceGroupCard.
-
-Do not create a card around every row.
-
-## Shapes
-
-Reuse Material 3/shared shape tokens.
-
-## Icons
-
-Reuse existing Material icons/components.
-
-## Motion
-
-Reuse existing motion patterns.
-
-## Responsive behavior
-
-Preserve compact/expanded behavior and existing tablet/landscape logic.
-
----
-
-# 14. GLASS / FROSTED UI AUDIT
-
-This is particularly important.
-
-NEVER write a generic instruction such as:
-
-"Add glassmorphism."
-
-Instead, define semantic surface roles.
-
-For every candidate surface classify:
-
-- SOLID
-- FLOATING CHROME
-- FROSTED MODAL
-- NO SPECIAL SURFACE
-
-For each frosted candidate document:
-
-- exact screen
-- exact component
-- exact location
-- reason
-- backdrop availability
-- expected translucency
-- fallback when translucent UI is disabled
-- performance considerations
-- accessibility considerations
-
-The following are NOT automatically glass:
-
-- settings cards
-- manga cards
-- long-form text
-- OCR result content
-- About content
-- ordinary list rows
-- large content surfaces
-
-Do not introduce true backdrop blur simply because it looks attractive.
-
-The existing project documentation explicitly records that true backdrop blur
-is deferred because of Compose rendering architecture and performance concerns.
+# 2. ROADMAP / SCOPE LOCK
+
+The roadmap currently has:
+
+```text
+Q3 = HARD HALTED
+Q4 = HARD HALTED
+Q5 = HARD HALTED
+Q6 = HARD HALTED
+Q7 = HARD HALTED
+Q8 = HARD HALTED
+Q9 = AUTHORIZED / EXECUTED
+AnymeX UI track = separately authorized
+```
 
 Therefore:
 
-DO NOT implement true backdrop blur during this mapping exercise.
+## HARD RULE
+
+Do NOT implement:
+
+- Q3
+- Q4
+- Q5
+- Q6
+- Q7
+- Q8
+
+Do not sneak features from those phases into this session.
+
+Do not renumber Q9.
+
+The Feed correction in this prompt is a **user-authorized UI correction** and should be treated as its own focused correction within the current work, not as permission to reopen unrelated roadmap items.
 
 ---
 
-# 15. FEATURE LOCATION MAP
+# 3. IMPORTANT UNCOMMITTED USER WORK
 
-Every feature must have exactly one canonical location.
+The user has existing uncommitted Q2 work.
 
-Create a table:
+Treat these as **UNTouchable user work**:
 
-| Feature | Current Location | Proposed Location | Reason | Related Settings | Implementation Owner |
-|---|---|---|---|---|---|
+```text
+BrowseSourceScreen.kt
+BrowseSourceScreenModel.kt
+docs/roadmap / memory / phase changes
+GenreTogglesTest.kt
+```
 
-Examples:
+The Q2 Browse genre-filter work is already device-tested and must not regress.
 
-- Panorama Cover
-- Cover-based theming
-- Dynamic controls
-- Reader controls
-- OCR
-- Read Aloud
-- Voice profiles
-- Speech rate
-- Dictionary
-- Text Recognition
-- Feed customization
-- Feed listing selector
-- Feed source selector
-- Storage Manager
-- Backup & Restore
-- Theme customization
-- Wallpapers
-- Navigation customization
-- etc.
+One small shared change already exists:
 
-Do not copy features from AnymeX or Chimahon automatically.
+```text
+BrowseSourceScreenModel.kt
+genreToggles()
+isGenreSelected()
+toggleGenreSelection()
+```
 
-Reference products may inspire organization and visual hierarchy, but
-Yomitsu remains its own product.
+were made accessible so Feed can reuse the filter model.
+
+Do NOT revert this.
+
+Do NOT redesign Q2.
+
+Do NOT commit Q2 separately.
+
+Do NOT clean up unrelated Q2 code merely because it looks refactorable.
 
 ---
 
-# 16. ANYMEX / CHIMAHON REFERENCE RULE
+# 4. WHAT HAS ALREADY BEEN IMPLEMENTED
 
-When using reference applications or documentation:
+The current session already implemented/audited:
 
-BORROW:
+## Tscan Feed crash
 
-- visual hierarchy
-- information architecture ideas
-- meaningful customization
-- settings organization
-- surface hierarchy
-- responsive thinking
-- discoverability
-- reader customization concepts
+Root cause:
 
-DO NOT COPY:
+`FeedScreenModel.fetchSection()` was executing:
 
-- branding
-- product identity
-- unrelated navigation architecture
-- anime ecosystem
-- tracking ecosystem
-- service integrations
-- unrelated features
-- visual identity wholesale
+```text
+source.getPopularManga()
+source.getLatestUpdates()
+```
 
-For every borrowed idea document:
+on Main through `screenModelScope`.
 
-REFERENCE
-→ OBSERVATION
-→ YOMITSU ADAPTATION
-→ WHY IT FITS YOMITSU
+Fixed by wrapping the network work in `withIOContext`.
+
+All three paths are covered:
+
+```text
+loadSections
+loadMore
+retry
+```
+
+Preserve this fix.
 
 ---
 
-# 17. SCREEN-BY-SCREEN DESIGN SPECIFICATION
+## BUG-003
 
-For EVERY major screen produce a specification with:
+`TtsPlaybackController.kt`
 
-## Screen identity
+Paused `onPageSelected` now resets:
 
-- Screen name
-- Route/destination
-- Purpose
-- Entry points
-- Exit/back behavior
+```text
+resumeIndex = 0
+```
 
-## Layout
+when changing pages.
 
-- AppBar/header
-- content container
-- sections
-- bottom navigation
-- floating elements
-- sheets/dialogs
-
-## Typography
-
-- title role
-- section header role
-- body role
-- supporting role
-- metadata role
-
-## Spacing
-
-Document the intended spacing relationships.
-
-## Surfaces
-
-Document:
-
-- background
-- card/surface
-- floating surface
-- frosted surface
-- prohibited surface treatments
-
-## Components
-
-Specify which existing component should be reused.
-
-## Interaction
-
-Document:
-
-- tap
-- long press
-- swipe
-- selection
-- expansion
-- navigation
-- menus
-- persistence
-
-## States
-
-Document:
-
-- loading
-- empty
-- error
-- selected
-- disabled
-- active
-- unavailable
-
-## Responsive behavior
-
-Document:
-
-- compact phone
-- expanded phone
-- landscape
-- tablet
-
-## Accessibility
-
-Document:
-
-- minimum touch target
-- content descriptions
-- text scaling
-- contrast
-- state communication
+Preserve.
 
 ---
 
-# 18. CODE OWNERSHIP MAP
+## BUG-004
 
-For every screen/component identify the actual source file.
+OCR cache now keys page lookup by:
+
+```text
+chapter
+page
+ocr_model
+```
+
+`OcrCacheStore` and repository pass the OCR model.
+
+No migration was required because the required uniqueness/index structure already exists.
+
+Preserve.
+
+---
+
+## BUG-005
+
+NextChapter now cancels `prefetchJob`.
+
+Preserve.
+
+---
+
+## BUG-006
+
+Android TTS voice-setting paths now check:
+
+```text
+TextToSpeech.SUCCESS
+```
+
+Preserve.
+
+---
+
+## BUG-007
+
+Verified unreachable.
+
+No code change.
+
+Do not invent a fix.
+
+---
+
+## BUG-008
+
+Removed no-op:
+
+```text
+.clickable { }
+```
+
+from dictionary result card.
+
+Preserve.
+
+---
+
+## BUG-009
+
+`FeedScreenModel` now supports:
+
+```text
+loadSectionsOnStart: Boolean = true
+```
+
+and Manage Feeds passes:
+
+```text
+false
+```
+
+to prevent unnecessary loading.
+
+Preserve.
+
+---
+
+## BUG-010
+
+Settings search now uses synchronous `remember()` instead of `produceState`.
+
+Also registered:
+
+```text
+SettingsReaderToolbarScreen()
+AppLanguageScreen()
+```
+
+in the unindexed settings list.
+
+Preserve.
+
+---
+
+# 5. Q9 ACCESSIBILITY WORK ALREADY IMPLEMENTED
+
+The Q9 accessibility batch implemented:
+
+### Category
+
+Move-up/move-down accessibility custom actions.
+
+### BaseSliderItem
+
+Added `stateDescription = valueString`.
+
+This covers approximately 20 slider callers.
+
+### Source selector
+
+Selected/not-selected state semantics.
+
+### TTS playback speed
+
+State description.
+
+### Large-font support
+
+Changed fixed:
+
+```text
+.height(56.dp)
+```
+
+to:
+
+```text
+.heightIn(min = 56.dp)
+```
+
+in the four audited locations.
+
+### Spinner
+
+Audited and determined acceptable.
+
+Do not change without evidence.
+
+---
+
+# 6. OCR/TTS LATENCY WORK ALREADY IMPLEMENTED
+
+The current v0.5.4 tree already includes:
+
+- OCR queue parallelism = 3
+- HIGH priority OCR work
+- GLENS unlocked
+- parallel prefetch
+- depth 2 prefetch
+- ChapterCache reuse
+
+Remote page resolution now:
+
+1. Checks cached page list first.
+2. Falls back to source network request.
+3. Checks cached image files.
+4. Refetches on decode failure.
+5. Properly rethrows `CancellationException`.
+
+The remaining reported 30–60 second first-page delay is primarily the GLENS service round-trip.
+
+The app-side duplicate page-list/image requests have already been addressed.
+
+Do not redesign OCR/TTS during this task.
+
+The final device report MUST include timing evidence from logcat.
+
+---
+
+# 7. FEED GENRE FILTER FEATURE
+
+The current Feed implementation includes source-supported filter chips.
+
+State includes:
+
+```text
+genreToggles
+sourceFilterList
+```
+
+Feed can use:
+
+```text
+source.getSearchManga(page, "", activeFilters)
+```
+
+when filters are active.
+
+Source selection:
+
+- loads the source's supported filter list,
+- does not unnecessarily refetch merely to change visible source selection,
+- restores the persisted source's filter list.
+
+Genre toggling triggers section refresh.
+
+This implementation is already based on the Q2 precedent.
+
+## DO NOT REMOVE IT.
+
+Genre chips should remain available when the selected source exposes supported filter leaves.
+
+If a source does not expose supported filter leaves, absence of chips is correct.
+
+Do not fabricate filters.
+
+---
+
+# 8. NEW USER-AUTHORIZED FEED UI CORRECTION
+
+## THIS SECTION SUPERSEDES THE PREVIOUS STACKED FEED SELECTOR LAYOUT.
+
+The latest session rebuilt `FeedFilterBar` into stacked rows.
+
+The user explicitly does NOT want that final arrangement.
+
+The desired arrangement is the earlier compact layout.
+
+---
+
+# 9. REMOVE `ALL` FROM FEED LISTING SELECTION
+
+The Feed listing selector currently exposes:
+
+```text
+All
+Popular
+Latest
+```
+
+Change the user-facing listing selector to:
+
+```text
+Popular
+Latest
+```
+
+`All` must disappear from:
+
+### Feed screen
+
+and:
+
+### Feed Settings / Customize Feed → Default listing
+
+There must be no visible:
+
+```text
+All
+```
+
+listing button/chip in either location.
+
+---
+
+## IMPORTANT DISTINCTION
+
+Do NOT remove:
+
+```text
+All sources
+```
+
+from the source selector if that is an existing valid source-selection option.
+
+These are different concepts:
+
+```text
+All sources
+```
+
+is source selection.
+
+```text
+All
+```
+
+was a listing mode.
+
+Only the listing mode `All` is being removed.
+
+---
+
+# 10. AUDIT THE UNDERLYING LISTING STATE BEFORE CHANGING IT
+
+Do not simply delete an enum/state because the UI no longer displays it.
+
+First inspect:
+
+- listing model/state
+- Feed preferences
+- persisted default listing
+- serialization
+- state restoration
+- tests
+- FeedScreenModel
+- Feed settings
+
+Determine whether existing installations may contain a legacy `All` preference.
+
+If they do:
+
+- safely migrate/fallback that value to an appropriate valid listing,
+- do not expose `All`,
+- do not corrupt preferences,
+- do not add a database migration.
+
+Do not introduce a new architecture merely to handle this.
+
+Use the smallest compatible solution.
+
+---
+
+# 11. RESTORE POPULAR/LATEST BESIDE SOURCE SELECTOR
+
+The desired Feed primary selector row is:
+
+```text
+[ Source selector ▼ ]   [ Popular ] [ Latest ]
+```
+
+NOT:
+
+```text
+[ Source selector ▼ ]
+
+[ Popular ] [ Latest ]
+```
+
+and NOT:
+
+```text
+[ Source selector ▼ ]
+
+[ All ] [ Popular ] [ Latest ]
+```
+
+The source selector should remain on the left.
+
+Popular and Latest should be positioned immediately to its right where screen width allows.
+
+The source selector's existing stable-width and ellipsis behavior must remain intact.
+
+Do not make the source selector jump in width when source names change.
+
+---
+
+# 12. RESPONSIVE BEHAVIOR
+
+The compact horizontal arrangement is the preferred layout.
+
+However, do not sacrifice usability on narrow screens.
+
+Audit actual available width.
+
+If all controls cannot fit safely:
+
+- use the existing appropriate Compose/M3 horizontal scrolling or responsive behavior,
+- preserve touch targets,
+- avoid clipping,
+- avoid overlap,
+- avoid arbitrary hardcoded widths.
+
+Do NOT invent a new responsive system.
+
+Do NOT blindly force everything into a row if that produces broken UI.
+
+The intent is:
+
+> compact horizontal primary controls, with graceful narrow-screen handling.
+
+---
+
+# 13. REMOVE DUPLICATED SOURCE/LISTING TITLE
+
+The Feed currently repeats information after the filter/navigation controls.
+
+It displays another title indicating things such as:
+
+```text
+Source Name
+Popular Listing
+```
+
+Remove this redundant source/listing heading.
+
+The source is already shown in:
+
+```text
+Source selector
+```
+
+The listing is already shown by:
+
+```text
+Popular / Latest selected state
+```
+
+Therefore do NOT repeat:
+
+```text
+Source Name
+Popular Listing
+```
+
+below the controls.
+
+Do not replace it with another equivalent duplicate header.
+
+The actual Feed manga content should begin after the filter controls.
+
+---
+
+# 14. FEED HEADER DENSITY
+
+The current vertical spacing is too large.
+
+Tighten the Feed structure.
+
+Desired hierarchy:
+
+```text
+Feed header
+   ↓ compact spacing
+[ Source ] [ Popular ] [ Latest ]
+   ↓ compact spacing
+[ Genre chips when available ]
+   ↓ appropriate content spacing
+Manga sections/grid
+```
+
+Avoid:
+
+- excessive blank space,
+- duplicate header rhythm,
+- unnecessary stacked controls,
+- arbitrary spacing islands,
+- inconsistent indentation.
+
+Use existing Yomitsu Material 3 spacing tokens.
+
+Known design tokens:
+
+```text
+4dp
+8dp
+16dp
+24dp
+32dp
+```
+
+with existing documented special 12dp usages.
+
+Do not invent a new spacing scale.
+
+---
+
+# 15. FEED HEADER COLLAPSE ON SCROLL
+
+The Feed should use vertical space efficiently.
+
+When the user scrolls DOWN:
+
+```text
+Feed header/filter chrome minimizes/collapses
+```
+
+so more manga content becomes visible.
+
+When the user scrolls UP:
+
+```text
+Feed header/filter chrome returns
+```
+
+appropriately.
+
+The behavior must be:
+
+- smooth,
+- predictable,
+- reversible,
+- non-jittery.
+
+Do not hide controls permanently.
+
+Do not break touch targets.
+
+Do not introduce nested/competing scrolling containers.
+
+Do not interfere with:
+
+- source selection,
+- Popular selection,
+- Latest selection,
+- genre filters,
+- paging,
+- load-more,
+- manga item scrolling.
+
+Before implementing this, audit the existing Feed scroll container.
+
+If an existing Compose/M3 collapsing behavior can be reused, use it.
+
+Do not create a custom scroll framework unless absolutely necessary.
+
+---
+
+# 16. GENRE FILTER ROW
+
+Genre/source-supported filter chips remain.
+
+Their placement should be:
+
+```text
+Primary row:
+[ Source ] [ Popular ] [ Latest ]
+
+Secondary row:
+[ Filter ] [ Filter ] [ Filter ] ...
+```
+
+The second row should:
+
+- align correctly with the Feed content inset,
+- use horizontal scrolling where appropriate,
+- retain M3 chip styling,
+- have appropriate compact spacing,
+- avoid excessive vertical gaps.
+
+Do not redesign the filter semantics.
+
+Do not turn all source filters into arbitrary manually curated "genres."
+
+The existing source-supported filter model is intentional.
+
+---
+
+# 17. FEED SETTINGS DEFAULT LISTING
+
+In:
+
+```text
+Feed Settings
+→ Default listing
+```
+
+change:
+
+```text
+All
+Popular
+Latest
+```
+
+to:
+
+```text
+Popular
+Latest
+```
+
+Requirements:
+
+- selected state remains obvious,
+- persistence remains correct,
+- no orphaned space remains,
+- spacing remains consistent with the settings design system,
+- terminology matches Feed screen,
+- no duplicate controls are introduced.
+
+---
+
+# 18. FEED DATA BEHAVIOR MUST REMAIN CORRECT
+
+This is a UI correction, not permission to weaken Feed filtering.
+
+The final data relationship must remain:
+
+```text
+Selected source
+       +
+Selected listing
+       +
+Selected source-supported filters
+       ↓
+actual Feed sections
+```
 
 Example:
 
-| UI Element | Current Source File | Shared Component | State Owner | Business Logic Owner |
-|---|---|---|---|---|
+```text
+Source = Asura
+Listing = Popular
+```
 
-This is mandatory.
+must display the relevant Asura Popular Feed.
 
-The implementation map must prevent an agent from editing a random file
-because it "looks like" the correct location.
+And:
+
+```text
+Source = Asura
+Listing = Latest
+```
+
+must display the relevant Asura Latest Feed.
+
+The highlighted listing must correspond to the actual data being rendered.
+
+Never allow:
+
+```text
+Popular highlighted
++
+Popular AND Latest data displayed
+```
+
+unless the underlying product specification explicitly requires that behavior.
 
 ---
 
-# 19. IMPLEMENTATION BOUNDARY
+# 19. IMPORTANT: DO NOT BLINDLY REWRITE FEEDFILTERBAR
 
-For every proposed change classify it:
+Before editing:
 
-- PRESENTATION ONLY
-- PRESENTATION + STATE
-- PREFERENCE CHANGE
-- NAVIGATION CHANGE
-- DOMAIN CHANGE
-- DATA CHANGE
-- DATABASE CHANGE
+Inspect:
 
-Default assumption:
+```text
+FeedScreen.kt
+FeedScreenModel.kt
+FeedTab.kt
+Feed settings/customize implementation
+Feed preferences
+listing model/state
+```
 
-UI modernization should remain presentation-only unless the feature
-cannot work otherwise.
+Trace:
 
-Do not alter:
+```text
+source selection
+listing selection
+genre filter state
+default listing
+persistence
+section loading
+paging
+scroll container
+header rendering
+```
 
+Identify the smallest set of changes.
+
+The likely UI owner is:
+
+```text
+app/src/main/java/eu/kanade/presentation/feed/FeedScreen.kt
+```
+
+but confirm this from source before editing.
+
+Do not assume.
+
+---
+
+# 20. PROTECTED AREAS
+
+Do NOT modify:
+
+- Reader navigation
+- TTS controller architecture
+- OCR engine architecture
+- OCR exclusion architecture
+- navigation IA
+- five-tab navigation
+- Browse IA
+- backup architecture
 - database schema
-- OCR pipeline
-- TTS engine
-- TTS playback controller
-- reader business logic
-- source/network logic
-- backup format
-- Mihon/Tachiyomi compatibility
-- existing preference keys
+- dependency graph
+- source extension APIs
+- Feed paging architecture
+- Manage Feeds architecture
+- Q2 genre filter architecture
 
-unless the feature explicitly requires it.
+unless a minimal supporting change is objectively required by compilation or correctness.
 
-If a feature appears to require a deeper architectural change, STOP and
-document the dependency rather than improvising.
+No new dependency.
 
----
+No database migration.
 
-# 20. PROTECTED SYSTEMS
-
-Create a dedicated "DO NOT TOUCH" section.
-
-At minimum include:
-
-- Reader playback behavior
-- OCR acquisition pipeline
-- OCR caching
-- OCR exclusion matching
-- TTS progression
-- TTS arbitration
-- bitmap lifecycle
-- database/schema
-- backup compatibility
-- existing preference semantics
-- source networking
-- Feed data fetching unless required for the listing bug
-- Mihon/Tachiyomi protocols
-- application IDs/namespaces
-- existing working navigation semantics
-
-UI work must not accidentally modify these systems.
+No unrelated refactoring.
 
 ---
 
-# 21. DISCREPANCY REGISTER
+# 21. ANYMEX UI TRACK
 
-Create a table:
+AnymeX is a **visual reference only**.
 
-| ID | Screen | Category | Current Problem | Expected | Severity | Root Cause | Proposed Resolution |
-|---|---|---|---|---|---|---|---|
+The available evidence is:
 
-Categories:
+```text
+11 screenshots
+720 × 1452
+dark gray / purple family
+#3f3846-family
+Liquid Mode
+Liquid Background
+Grain Texture
+OLED
+poster color
+```
 
-- Typography
-- Spacing
-- Alignment
-- Indentation
-- Header
-- Navigation
-- Surface
-- Grouping
-- Responsive
-- Accessibility
-- Interaction
-- Functional
-- State
-- Discoverability
+Do NOT copy exact dimensions from AnymeX.
 
-This register must include even small inconsistencies.
+Use Yomitsu's existing M3 tokens.
 
-Do not hide minor discrepancies.
+The user-authorized design direction remains:
+
+- structured,
+- modern,
+- premium,
+- spacious,
+- minimal,
+- manga-reader personality,
+- subtle depth,
+- no neon,
+- no cyberpunk,
+- no excessive gradients,
+- no glass-everywhere treatment.
 
 ---
 
-# 22. FUNCTIONAL UI AUDIT
+# 22. LIQUID BACKGROUND IS DEFERRED
 
-Visual correctness is not enough.
+Do NOT implement:
 
-Audit UI behavior for controls that appear correct but do not work.
+- Liquid Mode
+- Liquid Background
+- Grain Texture
+- OLED theme layer
+- poster-color background system
 
-At minimum verify:
+in this task.
 
-- Feed All/Popular/Latest
-- Feed source selector
-- Feed source persistence
-- Feed customization
-- Recent tab switching
-- Recent swipe
-- selected tab state
-- More navigation
-- settings grouping navigation
-- reader controls
-- settings toggles
-- dialogs
-- sheets
-- expandable rows
+The investigation concluded that current opaque Scaffold containers hide background layers.
+
+A proper implementation would require:
+
+```text
+theme-derived background
++
+root gradient
++
+translucent container audit
++
+multi-screen verification
+```
+
+That is intentionally deferred.
+
+Do NOT half-implement it.
+
+Do NOT reintroduce true backdrop blur.
+
+---
+
+# 23. TRUE BACKDROP BLUR IS REJECTED
+
+Do not introduce:
+
+```text
+RenderEffect
+```
+
+or a sibling-sampling blur architecture.
+
+Reason:
+
+- Compose rendering constraints,
+- performance,
+- battery,
+- AMOLED implications,
+- architecture blast radius.
+
+Use existing Yomitsu frost/surface roles only.
+
+---
+
+# 24. DESIGN SYSTEM RULES
+
+Use:
+
+```text
+MaterialTheme.colorScheme.*
+MaterialTheme.padding.*
+MaterialTheme.shapes.*
+existing Typography roles
+```
+
+Known spacing:
+
+```text
+extraSmall = 4dp
+small      = 8dp
+medium     = 16dp
+large      = 24dp
+extraLarge = 32dp
+```
+
+Screen horizontal inset:
+
+```text
+16dp
+```
+
+Existing grouped settings rhythm:
+
+```text
+PreferenceGroupCard
+12dp inter-card gap
+```
+
+Do not add arbitrary dimensions when an existing token already expresses the intent.
+
+---
+
+# 25. AUDIT-FIRST EXECUTION ORDER
+
+Perform the work in this order.
+
+## STEP 1 — Repository state
+
+Inspect:
+
+```text
+git status
+git diff --stat
+git diff
+```
+
+Understand every existing user change.
+
+Do not overwrite anything.
+
+---
+
+## STEP 2 — Feed audit
+
+Inspect:
+
+```text
+FeedScreen.kt
+FeedScreenModel.kt
+FeedTab.kt
+ManageFeedsScreen.kt
+Feed preference/state definitions
+Feed tests
+```
+
+Map:
+
+```text
+source selector
+listing selector
+genre filters
+source/listing title
+scroll container
+header
+default listing
+persistence
+```
+
+---
+
+## STEP 3 — Existing UI map comparison
+
+Compare the current implementation against:
+
+```text
+docs/ui-implementation-map.md
+docs/design.md
+docs/design-audit.md where still historically relevant
+docs/implementation-roadmap.md
+docs/memory.md
+docs/phase.md
+```
+
+Remember:
+
+The implementation map is the current UI blueprint, but newer explicit user decisions supersede older layout assumptions.
+
+The user's latest Feed instruction supersedes the previously implemented stacked selector layout.
+
+---
+
+## STEP 4 — State/persistence audit
+
+Determine:
+
+- where `All` is defined,
+- where Popular/Latest are defined,
+- whether `All` exists in persisted preferences,
+- how default listing is restored,
+- whether tests depend on `All`.
+
+Design the smallest compatibility-safe change.
+
+---
+
+## STEP 5 — Implement Feed correction
+
+Only after the audit:
+
+1. Remove `All` from user-facing listing controls.
+2. Safely handle legacy `All` state if required.
+3. Restore Popular/Latest beside source selector.
+4. Remove duplicate source/listing title.
+5. Tighten header spacing.
+6. Preserve genre filter row.
+7. Implement/reuse header collapse-on-scroll.
+8. Correct settings Default listing UI.
+9. Preserve actual Feed filtering.
+
+---
+
+# 26. TEST REQUIREMENTS
+
+Add or update only the tests required for deterministic changed behavior.
+
+At minimum test:
+
+### Listing
+
+```text
+Popular selection
+Latest selection
+All absent from UI/state where appropriate
+```
+
+### Persistence
+
+```text
+Popular default persists
+Latest default persists
+legacy All handled safely if encountered
+```
+
+### Composition
+
+```text
+source + listing
+source + listing + genre filter
+```
+
+### Genre
+
+```text
+chip toggle
+chip deselection
+source-specific filters
+```
+
+### Feed loading
+
+Verify:
+
+```text
+loadSections
+loadMore
+retry
+```
+
+still work after the UI correction.
+
+### Existing tests
+
+Reuse existing patterns.
+
+Do not create a giant new test framework.
+
+---
+
+# 27. FORMATTING / BUILD GATES
+
+The host has no Android SDK.
+
+Use the known Docker environment:
+
+```text
+image:
+vsc-yomihon-e24e3bd7e46d5060e88796634a865cb501faf4766a48662dbc474a380427c674
+```
+
+Run as:
+
+```text
+-u vscode
+```
+
+with:
+
+```text
+-v "$PWD":/workspace
+-v yomihon-gradle-home:/home/vscode/.gradle
+-v yomihon-android-home:/home/vscode/.android
+-w /workspace
+```
+
+and:
+
+```text
+GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx4g"
+```
+
+Do NOT use 2560m heap.
+
+The reported environment needs approximately 4 GB Gradle heap for reliability.
+
+---
+
+# 28. REQUIRED GATES
+
+Run in this order:
+
+```text
+./gradlew spotlessApply
+```
+
+then:
+
+```text
+./gradlew spotlessCheck
+```
+
+then:
+
+```text
+./gradlew testDebugUnitTest
+```
+
+then:
+
+```text
+./gradlew verifySqlDelightMigration
+```
+
+then:
+
+```text
+./gradlew :app:assembleDebug
+```
+
+Do not skip failed gates.
+
+If one fails:
+
+1. diagnose root cause,
+2. make smallest fix,
+3. rerun affected gate,
+4. continue only after it passes.
+
+---
+
+# 29. DEVICE
+
+Primary device:
+
+```text
+SM_M066B
+```
+
+Wireless ADB:
+
+```text
+192.168.29.98:5555
+```
+
+Device verification is REQUIRED.
+
+Do not claim device verification from compilation alone.
+
+---
+
+# 30. FEED DEVICE TEST MATRIX
+
+On the device verify:
+
+### Basic
+
+- Open Feed.
+- Feed loads without crash.
+- Source selector opens.
+- Source selection works.
+- Popular selection works.
+- Latest selection works.
+
+### Listing UI
+
+Verify:
+
+```text
+All = absent
+Popular = present
+Latest = present
+```
+
+### Layout
+
+Verify:
+
+```text
+[Source] [Popular] [Latest]
+```
+
+are in the intended compact arrangement.
+
+Check:
+
+- indentation,
+- spacing,
+- chip alignment,
+- source selector width,
+- ellipsis,
+- narrow-width behavior,
+- no overlap,
+- no clipping.
+
+### Duplicate information
+
+Confirm that the old:
+
+```text
+Source Name
+Popular Listing
+```
+
+duplicate title is gone.
+
+### Genre
+
+For a source that supports filters:
+
+- genre/filter chips appear,
+- toggle works,
+- selected state is visible,
+- results actually change,
+- deselection restores expected results.
+
+For a source with no supported filter leaves:
+
+- no fake filter chips appear.
+
+### Scroll
+
+Scroll DOWN:
+
+```text
+header minimizes
+```
+
+Scroll UP:
+
+```text
+header returns
+```
+
+Verify:
+
+- no jitter,
+- no jump,
+- no broken grid,
+- no nested-scroll issue.
+
+### Paging
+
+Verify load-more still works.
+
+### Persistence
+
+Change:
+
+```text
+source
+listing
+filters
+```
+
+navigate away/back and verify expected persistence.
+
+### Manage Feeds
+
+Open Manage Feeds and verify it still works.
+
+---
+
+# 31. FULL REGRESSION MATRIX
+
+Because this session contains more than Feed work, run the relevant existing regression matrix for:
+
+### Accessibility
+
+- category reorder actions
+- slider descriptions
+- source selected state
+- TTS speed state
+- large-font layout
+
+### Browse Q2
+
+- sources
+- search
+- genre/filter chips
+- query + filter intersection
+- empty result
+- retry
+- navigation state preservation
+
+Do NOT alter Q2.
+
+### Library
+
+- grid
+- categories
+- selection
 - filters
-- sort controls
-- persistence where expected
 
-For every control:
+### Recent
 
-VISIBLE STATE
-must equal
-ACTUAL STATE.
+- Continue
+- History
+- Updates
 
----
+### More
 
-# 23. RECENT / FEED / MORE REGRESSION PRIORITY
+- Studies card
+- Library card
+- settings navigation
 
-These areas receive P0/P1 audit priority because they were recently changed.
+### Settings
 
-Priority:
+- settings search
+- reader settings
+- app language
+- searchable settings
 
-P0:
-- Feed listing selector correctness
-- Recent tab layout correctness
-- More internal grouping correctness
-- typography/spacing/alignment regressions in recently modified screens
+### Reader/TTS
 
-P1:
-- Feed customization
-- source selector
-- Recent empty states
-- Recent row alignment
-- More destination consistency
+Only smoke-test.
 
-P2:
-- broader visual consistency
-- minor typography/spacing cleanup
+Do not modify architecture.
+
+### OCR
+
+Smoke-test relevant queue/preload paths.
+
+Capture timing evidence where required.
 
 ---
 
-# 24. DO NOT TRUST PREVIOUS PASS/FAIL RECORDS BLINDLY
+# 32. OCR/TTS LATENCY EVIDENCE
 
-Previous device verification records are evidence, not permanent truth.
+The final report must include actual device evidence for the current preload path.
 
-If current source behavior contradicts a previous PASS:
+Capture logcat evidence showing:
 
-- reproduce
-- investigate
-- document the discrepancy
-- determine whether the previous verification was incomplete,
-  stale, state-dependent, or testing a different behavior
+- page-list cache reuse where applicable,
+- image-cache reuse where applicable,
+- OCR startup/preload timing,
+- remaining network/service latency where observable.
 
-Do not simply mark the new observation as invalid.
+Do not claim the entire 30–60 second delay was eliminated.
+
+The current verdict is that the remaining delay is largely GLENS service round-trip.
 
 ---
 
-# 25. DESIGN IMPLEMENTATION MAP OUTPUT
+# 33. DOCUMENTATION
 
-Create:
+After implementation and verification, update:
 
+```text
+docs/implementation-roadmap.md
 docs/ui-implementation-map.md
+docs/memory.md
+docs/phase.md
+```
 
-This is the primary deliverable.
+Record:
 
-It must contain:
+### Feed correction
 
-1. Document purpose
-2. Current application UI inventory
-3. Navigation map
-4. Screen hierarchy
-5. Design system reference
-6. Typography specification
-7. Spacing specification
-8. Alignment specification
-9. Header specification
-10. Surface specification
-11. Glass/frost rules
-12. Responsive specification
-13. Component inventory
-14. Screen-by-screen implementation map
-15. Feature placement map
-16. Settings information architecture
-17. More two-level grouping map
-18. Recent implementation map
-19. Feed implementation map
-20. Feed listing behavior contract
-21. Code ownership map
-22. Implementation boundaries
-23. Protected systems
-24. Discrepancy register
-25. Functional audit findings
-26. Accessibility requirements
-27. Motion requirements
-28. Reference adaptation notes
-29. Implementation sequence
-30. Acceptance criteria
-31. Regression checklist
-32. Open questions / approval gates
+Document:
+
+- removal of listing `All`,
+- Popular/Latest compact placement,
+- removal of duplicate source/listing header,
+- header collapse behavior,
+- preserved genre filters,
+- tests,
+- device evidence.
+
+### Q9
+
+Record actual final status.
+
+### Background
+
+Record:
+
+```text
+Liquid/Background = designed but deferred
+```
+
+Do not mark it implemented.
+
+### AnymeX
+
+Keep the track separate from Q-numbering.
 
 ---
 
-# 26. DESIGN SPECIFICATION MUST BE IMPLEMENTATION-GRADE
+# 34. FINAL REPORT
 
-Avoid vague statements such as:
+At the end produce a concise but evidence-based final report.
 
-- "make it modern"
-- "improve spacing"
-- "add glass"
-- "make the tabs nicer"
-- "make settings cleaner"
-- "use better typography"
+Include:
 
-Instead write measurable/implementable instructions such as:
+```text
+SESSION RESULT
+```
 
-- use the existing Material typography role
-- preserve the shared settings row metrics
-- use 16dp screen inset
-- use the established 12dp group gap
-- use one PreferenceGroupCard per conceptual group
-- use transparent ListItem rows inside tonal grouped surfaces
-- use FilterChip for source selection
-- keep listing selector as a single-select state
-- use existing MaterialTheme.colorScheme tokens
-- no true backdrop blur
-- no frost on readable content
-- etc.
+Then sections:
 
-If exact dimensions cannot be safely inferred from the current component
-system, explicitly mark them as "requires approval" instead of inventing
-values.
+```text
+A. Repository state
+B. Scope executed
+C. Feed UI correction
+D. Q9 accessibility
+E. Bugs fixed
+F. Tscan fix
+G. OCR/TTS latency work
+H. Tests
+I. Formatting
+J. SQLDelight verification
+K. Build
+L. Device verification
+M. Documentation
+N. Remaining risks / deferred work
+```
 
----
+For every claim use actual evidence.
 
-# 27. APPROVAL GATES
+Do not say:
 
-The blueprint must identify decisions that require user approval.
+```text
+PASS
+```
 
-Examples:
-
-- exact feature placement
-- new settings category
-- major navigation changes
-- new component
-- new surface role
-- true blur
-- new persistent preference
-- database change
-- architecture change
-
-Do not make those decisions silently.
+without explaining what was tested.
 
 ---
 
-# 28. IMPLEMENTATION SEQUENCE
+# 35. COMMIT RULE
 
-After completing the audit, propose an implementation sequence.
+Absolutely NO:
 
-It should NOT be:
+```text
+git commit
+git tag
+git push
+GitHub release
+APK release
+```
 
-"implement everything."
+unless the user explicitly authorizes it.
 
-Instead use controlled batches such as:
-
-Batch 0:
-Documentation + audit only
-
-Batch 1:
-Typography + spacing + alignment corrections
-
-Batch 2:
-Recent UI corrections
-
-Batch 3:
-Feed functional + visual corrections
-
-Batch 4:
-More internal grouping
-
-Batch 5:
-Shared surface/component refinement
-
-Batch 6:
-Approved new feature placement
-
-Batch 7:
-Glass/frosted treatment only where explicitly approved
-
-Batch 8:
-Responsive/accessibility pass
-
-Batch 9:
-Device verification
-
-Each batch must have:
-
-- scope
-- files
-- protected systems
-- expected behavior
-- visual acceptance criteria
-- functional acceptance criteria
-- regression tests
+Leave the working tree available for user review.
 
 ---
 
-# 29. FINAL QUALITY CHECK
+# 36. SUB-AGENT RULE
 
-Before declaring the blueprint complete, verify:
+Maximum:
 
-[ ] Every bottom-nav screen is mapped
-[ ] Every major destination is mapped
-[ ] Every settings screen is mapped
-[ ] More destinations have been recursively audited
-[ ] Recent is mapped
-[ ] Feed is mapped
-[ ] Feed listing bug is investigated
-[ ] Typography is audited
-[ ] Line spacing is audited
-[ ] Spacing is audited
-[ ] Indentation is audited
-[ ] Alignment is audited
-[ ] Headers are audited
-[ ] Surface hierarchy is audited
-[ ] Glass placement is explicitly mapped
-[ ] Responsive behavior is mapped
-[ ] Accessibility is mapped
-[ ] Feature placement is explicit
-[ ] Code ownership is explicit
-[ ] Protected systems are explicit
-[ ] Implementation boundaries are explicit
-[ ] Previous device-pass claims have been rechecked where necessary
-[ ] No speculative implementation was performed
-[ ] No application source files were modified during the mapping phase
+```text
+2 parallel sub-agents
+```
+
+at any time.
+
+Queue additional work sequentially.
+
+Use agents for:
+
+- targeted audits,
+- tests,
+- independent verification,
+
+not for uncontrolled broad rewrites.
+
+All agents must respect:
+
+```text
+smallest diff
+protected areas
+Q3-Q8 hard halt
+Q2 uncommitted work
+no commits
+```
 
 ---
 
-# 30. STOP CONDITION
+# 37. IMPORTANT FAILURE-PREVENTION RULES
 
-STOP after producing the documentation.
+Never:
 
-Do NOT begin implementing the UI redesign automatically.
+- reset the repository,
+- discard user changes,
+- stash user work,
+- rewrite Feed architecture unnecessarily,
+- redesign the Feed from scratch,
+- reintroduce `All`,
+- remove `All sources`,
+- remove genre filters,
+- break source persistence,
+- alter Feed paging,
+- modify navigation IA,
+- modify reader architecture,
+- introduce true blur,
+- implement Liquid Background,
+- add dependencies,
+- create a DB migration,
+- silently commit.
 
-The user will review the resulting:
+If something appears inconsistent:
 
-docs/ui-implementation-map.md
+**audit first, then fix only the proven root cause.**
 
-and then provide the final approved feature list / implementation scope.
+---
 
-Only after approval should implementation begin.
+# 38. FINAL FEED VISUAL CONTRACT
 
-The implementation agent must treat the approved
-docs/ui-implementation-map.md as the UI equivalent of a Figma handoff.
+The preferred final Feed structure is:
 
-No guessing.
-No improvisation.
-No "while I'm here" refactors.
-No glass-everywhere.
-No random spacing values.
-No arbitrary typography.
-No moving features without an explicit IA decision.
-No functional changes hidden inside visual changes.
+```text
+┌────────────────────────────────────────────┐
+│ Feed                                  +   │
+│                                            │
+│ [ Source ▼ ]    [ Popular ] [ Latest ]     │
+│                                            │
+│ [ Filter ] [ Filter ] [ Filter ] →         │
+│                                            │
+│ Manga content                              │
+│                                            │
+│ [cover] [cover] [cover] [cover]            │
+│ [cover] [cover] [cover] [cover]            │
+└────────────────────────────────────────────┘
+```
 
-The goal is controlled, deterministic, reviewable UI modernization.
+On scroll down:
+
+```text
+┌────────────────────────────────────────────┐
+│                                            │
+│ [compact/minimized chrome]                 │
+│                                            │
+│ [cover] [cover] [cover] [cover]            │
+│ [cover] [cover] [cover] [cover]            │
+│ [cover] [cover] [cover] [cover]            │
+└────────────────────────────────────────────┘
+```
+
+On scroll up:
+
+```text
+Feed header
+[ Source ] [ Popular ] [ Latest ]
+[ Filter ] [ Filter ] ...
+```
+
+---
+
+# 39. EXPLICITLY REJECTED FINAL LAYOUT
+
+Do NOT leave Feed as:
+
+```text
+Feed
+
+[ Source ▼ ]
+
+[ All ] [ Popular ] [ Latest ]
+
+[ Filter ] [ Filter ] [ Filter ]
+
+Source Name
+Popular Listing
+
+Manga content...
+```
+
+This is explicitly rejected because:
+
+1. `All` is unnecessary.
+2. Source/listing information is duplicated.
+3. Controls consume excessive vertical space.
+4. The previous stacked implementation reduced manga visibility.
+5. The source and listing are already communicated by the controls.
+6. The header should collapse during scrolling.
+
+---
+
+# 40. DEFINITION OF DONE
+
+This task is DONE only when all of the following are true:
+
+## Feed
+
+- [ ] `All` removed from Feed listing UI.
+- [ ] `All` removed from Feed Settings → Default listing UI.
+- [ ] Popular remains.
+- [ ] Latest remains.
+- [ ] Popular/Latest are beside the source selector in the preferred compact layout.
+- [ ] Source selector retains stable width/ellipsis behavior.
+- [ ] Duplicate source/listing title removed.
+- [ ] Header spacing tightened.
+- [ ] Genre filter row preserved.
+- [ ] Header minimizes while scrolling down.
+- [ ] Header restores while scrolling up.
+- [ ] No nested-scroll regression.
+- [ ] No clipping/overlap.
+- [ ] Narrow-screen behavior verified.
+- [ ] Actual displayed data matches selected listing.
+
+## Feed functionality
+
+- [ ] Source selection works.
+- [ ] Popular works.
+- [ ] Latest works.
+- [ ] Genre filters work.
+- [ ] Persistence works.
+- [ ] Paging works.
+- [ ] Load-more works.
+- [ ] Retry works.
+- [ ] Manage Feeds works.
+
+## Q9
+
+- [ ] Accessibility changes preserved.
+- [ ] Existing a11y tests pass.
+- [ ] Large-font behavior remains valid.
+
+## Q2
+
+- [ ] Existing uncommitted Q2 work preserved.
+- [ ] Browse genre-filter regression passes.
+
+## Engineering
+
+- [ ] `spotlessApply` passes.
+- [ ] `spotlessCheck` passes.
+- [ ] `testDebugUnitTest` passes.
+- [ ] `verifySqlDelightMigration` passes.
+- [ ] `assembleDebug` passes.
+- [ ] Device install succeeds.
+- [ ] Device matrix passes.
+- [ ] OCR/TTS timing evidence captured.
+- [ ] Documentation updated.
+- [ ] No commits/tags/releases created.
+
+---
+
+# 41. OPERATING PRINCIPLE
+
+The goal is NOT to make the most changes.
+
+The goal is to leave Yomitsu with the **smallest correct implementation** that:
+
+```text
+preserves existing architecture
+        +
+fixes the Feed UI regression
+        +
+finishes authorized verification
+        +
+does not disturb protected systems
+        +
+leaves clear evidence
+```
+
+If an existing implementation can be reused, reuse it.
+
+If a behavior already works, do not rewrite it.
+
+If a problem cannot be reproduced or proven, document it rather than inventing a fix.
+
+**Audit → smallest change → test → build → device verify → document → stop.**

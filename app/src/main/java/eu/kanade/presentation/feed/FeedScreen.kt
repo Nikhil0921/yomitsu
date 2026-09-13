@@ -75,7 +75,6 @@ import eu.kanade.tachiyomi.ui.feed.FeedSectionResult
 import tachiyomi.domain.manga.model.asMangaCover
 import tachiyomi.domain.source.model.Source
 import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.components.ListGroupHeader
 import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
@@ -159,79 +158,79 @@ fun FeedScreen(
             return@Scaffold
         }
 
-        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
-            FeedFilterBar(
-                state = state,
-                onSelectSource = onSelectSource,
-                onSelectListing = onSelectListing,
-                onToggleGenre = onToggleGenre,
-            )
-            val bottom = padding.calculateBottomPadding()
-            LazyVerticalGrid(
-                columns = if (gridColumns > 0) GridCells.Fixed(gridColumns) else GridCells.Adaptive(96.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottom),
-                verticalArrangement = Arrangement.spacedBy(CommonMangaItemDefaults.GridVerticalSpacer),
-                horizontalArrangement = Arrangement.spacedBy(CommonMangaItemDefaults.GridHorizontalSpacer),
-            ) {
-                state.visibleFeeds.forEach { feed ->
-                    item(span = { GridItemSpan(maxLineSpan) }, contentType = { "feed_header" }) {
-                        FeedHeader(feed, state)
+        // Filter bar is the first grid item: scrolling content collapses it
+        // out of view naturally and it returns on scroll-up (no nested scroll
+        // containers, no custom collapse framework).
+        val bottom = padding.calculateBottomPadding()
+        LazyVerticalGrid(
+            columns = if (gridColumns > 0) GridCells.Fixed(gridColumns) else GridCells.Adaptive(96.dp),
+            modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
+            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottom),
+            verticalArrangement = Arrangement.spacedBy(CommonMangaItemDefaults.GridVerticalSpacer),
+            horizontalArrangement = Arrangement.spacedBy(CommonMangaItemDefaults.GridHorizontalSpacer),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }, contentType = { "feed_filter_bar" }) {
+                FeedFilterBar(
+                    state = state,
+                    onSelectSource = onSelectSource,
+                    onSelectListing = onSelectListing,
+                    onToggleGenre = onToggleGenre,
+                )
+            }
+            state.visibleFeeds.forEach { feed ->
+                when (val section = state.sections[feed]) {
+                    is FeedSectionResult.Success -> {
+                        items(section.mangas, key = { "${feed.sourceId}-${feed.listing}-${it.url}" }) { manga ->
+                            if (compactGrid) {
+                                MangaCompactGridItem(
+                                    coverData = manga.asMangaCover(),
+                                    onClick = { onMangaClick(manga.id) },
+                                    onLongClick = { },
+                                    title = manga.title,
+                                )
+                            } else {
+                                MangaComfortableGridItem(
+                                    coverData = manga.asMangaCover(),
+                                    title = manga.title,
+                                    onClick = { onMangaClick(manga.id) },
+                                    onLongClick = { },
+                                )
+                            }
+                        }
+                        item(span = { GridItemSpan(maxLineSpan) }, contentType = { "feed_section_footer" }) {
+                            FeedSectionFooter(
+                                section = section,
+                                onRetry = { onRetry(feed) },
+                                onLoadMore = { onLoadMore(feed) },
+                            )
+                        }
                     }
-                    when (val section = state.sections[feed]) {
-                        is FeedSectionResult.Success -> {
-                            items(section.mangas, key = { "${feed.sourceId}-${feed.listing}-${it.url}" }) { manga ->
-                                if (compactGrid) {
-                                    MangaCompactGridItem(
-                                        coverData = manga.asMangaCover(),
-                                        onClick = { onMangaClick(manga.id) },
-                                        onLongClick = { },
-                                        title = manga.title,
-                                    )
-                                } else {
-                                    MangaComfortableGridItem(
-                                        coverData = manga.asMangaCover(),
-                                        title = manga.title,
-                                        onClick = { onMangaClick(manga.id) },
-                                        onLongClick = { },
-                                    )
-                                }
-                            }
-                            item(span = { GridItemSpan(maxLineSpan) }, contentType = { "feed_section_footer" }) {
-                                FeedSectionFooter(
-                                    section = section,
-                                    onRetry = { onRetry(feed) },
-                                    onLoadMore = { onLoadMore(feed) },
-                                )
-                            }
-                        }
-                        is FeedSectionResult.Loading, null -> item(
-                            span = { GridItemSpan(maxLineSpan) },
-                            contentType = { "feed_section_loading" },
+                    is FeedSectionResult.Loading, null -> item(
+                        span = { GridItemSpan(maxLineSpan) },
+                        contentType = { "feed_section_loading" },
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(MaterialTheme.padding.medium),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(MaterialTheme.padding.medium),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CircularProgressIndicator()
-                            }
+                            CircularProgressIndicator()
                         }
-                        is FeedSectionResult.Error -> item(
-                            span = { GridItemSpan(maxLineSpan) },
-                            contentType = { "feed_section_error" },
+                    }
+                    is FeedSectionResult.Error -> item(
+                        span = { GridItemSpan(maxLineSpan) },
+                        contentType = { "feed_section_error" },
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(MaterialTheme.padding.medium),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(MaterialTheme.padding.medium),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    text = section.message ?: stringResource(MR.strings.unknown_error),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                                TextButton(onClick = { onRetry(feed) }) {
-                                    Text(stringResource(MR.strings.action_retry))
-                                }
+                            Text(
+                                text = section.message ?: stringResource(MR.strings.unknown_error),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(onClick = { onRetry(feed) }) {
+                                Text(stringResource(MR.strings.action_retry))
                             }
                         }
                     }
@@ -261,24 +260,6 @@ fun FeedScreen(
             showListingSelector = state.showListingSelector,
             defaultListing = state.defaultListing,
             onDismiss = { showCustomizeDialog = false },
-        )
-    }
-}
-
-@Composable
-private fun FeedHeader(feed: FeedItem, state: FeedScreenModel.State) {
-    val source = state.sources.firstOrNull { it.id == feed.sourceId }
-    Column {
-        ListGroupHeader(
-            text = source?.visualName ?: stringResource(MR.strings.feed_source_unavailable),
-        )
-        Text(
-            text = stringResource(
-                if (feed.listing == FeedListing.LATEST) MR.strings.latest else MR.strings.popular,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
         )
     }
 }
@@ -405,34 +386,30 @@ private fun FeedFilterBar(
 
     if (!showSelectorRow) return
 
-    // Stacked rows: selector chip on its own line, listing chips below with a
-    // clear gap (no touching/overlapping surfaces; stable footprint preserved).
+    // Compact rows: primary controls inline in one row (source selector left,
+    // listing chips right where width allows), source-supported filter chips
+    // on a second scrollable row.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = MaterialTheme.padding.medium),
-        verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            .padding(horizontal = MaterialTheme.padding.extraSmall)
+            .padding(vertical = MaterialTheme.padding.extraSmall),
+        verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
     ) {
-        if (hasSourceSelector) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (hasSourceSelector) {
                 SourceSelectorDropdown(
                     state = state,
                     onSelectSource = onSelectSource,
                 )
             }
-        }
-        if (state.showListingSelector && hasListings) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-            ) {
-                FilterChip(
-                    selected = state.listingOverride == null,
-                    onClick = { onSelectListing(null) },
-                    label = { Text(stringResource(MR.strings.all)) },
-                )
+            if (state.showListingSelector && hasListings) {
                 FilterChip(
                     selected = state.listingOverride == FeedListing.POPULAR,
                     onClick = { onSelectListing(FeedListing.POPULAR) },
@@ -619,11 +596,6 @@ private fun FeedCustomizeDialog(
             // Listing
             PreferenceGroupCard(title = stringResource(MR.strings.feed_default_listing)) {
                 SettingsChipRow(MR.strings.feed_default_listing) {
-                    FilterChip(
-                        selected = defaultListing == null,
-                        onClick = { onSelectDefaultListing(null) },
-                        label = { Text(stringResource(MR.strings.all)) },
-                    )
                     FilterChip(
                         selected = defaultListing == FeedListing.POPULAR,
                         onClick = { onSelectDefaultListing(FeedListing.POPULAR) },

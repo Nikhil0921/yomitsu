@@ -314,27 +314,38 @@ component. New components require approval (§27).**
   lazy item; rows heightIn(min 96), cover 96dp, PlayArrow resume IconButton
   (48dp, contentDescription action_resume). Row tap = resume too.
 
-### 14.3 Feed (P0 — recently changed + functional bug)
+### 14.3 Feed (P0 — 2026-09-13 UI correction)
 
 - Identity: `FeedTab` (tab 2). Screen: FeedScreen.kt. Model:
   FeedScreenModel (sections map keyed by FeedItem; paging state per feed;
   PAGE_SIZE=20 ponytail assumption documented in code).
-- Layout: Scaffold + AppBar("Feed", enterAlways) + [FilterBar + Lazy grid].
-  FilterBar: SourceSelectorDropdown chip (left) + listing FilterChips
-  (scrollable, right-aligned weight(1f)); hidden when <2 feed sources and no
-  mixed listings.
+- Layout: Scaffold + AppBar("Feed", enterAlways) + Lazy grid with FilterBar
+  as first full-span grid item (scrolls away naturally = collapse-on-scroll,
+  returns on scroll-up; no nested scroll containers). FilterBar: single
+  compact primary row = SourceSelectorDropdown chip (left, stable-width +
+  ellipsis) + Popular/Latest FilterChips to its right (horizontalScroll for
+  narrow screens); genre row below (horizontalScroll, source-supported
+  filter leaves only). No `All` listing chip anywhere; legacy null
+  defaultListing falls back to Popular at read (FeedScreenModel prefs
+  collect). No per-section source/listing header — controls communicate
+  selection; content starts after filters. Genre chip row only when the
+  selected source exposes toggleable Filter leaves (honest absence).
 - Grid: Adaptive(96dp) or Fixed(gridColumns pref); 8dp edges, 4dp gutters
-  (CommonMangaItemDefaults — matches Library); section header =
-  ListGroupHeader(source name) + bodySmall listing label + divider; footer =
+  (CommonMangaItemDefaults — matches Library); section footer =
   Load more / spinner / "You're all caught up"; error row = message + retry.
 - Customize sheet (AdaptiveSheet + PreferenceGroupCards): Display (grid
   columns chips + grid style chips) / Sources (show-selector switch) /
-  Default listing (chips + show-listing-selector switch).
+  Default listing (Popular + Latest chips only — no All; show-listing-
+  selector switch).
 - ManageFeedsScreen: AppBar + single PreferenceGroupCard("Reorder feeds") +
   transparent ListItems (up/down/switch/delete).
 - AddFeedDialog: AlertDialog + transparent ListItems + RadioButton + listing
   FilterChips (supportsLatest gates Latest).
-- **LISTING SELECTOR BUG — see §15 (P0).**
+- Device-verified 2026-09-13 (SM_M066B debug build): compact row layout,
+  no All, Popular/Latest single-select + data match (distinct result sets),
+  genre toggle/deselect roundtrip, "All sources" dropdown option preserved,
+  collapse/return on scroll, load-more, persistence (source+listing across
+  restart + ManageFeeds roundtrip), legacy null default → Popular fallback.
 - Surfaces: solid; chips M3; no frost anywhere in Feed.
 
 ### 14.4 Library

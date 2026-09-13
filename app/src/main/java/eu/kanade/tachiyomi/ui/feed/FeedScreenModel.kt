@@ -123,13 +123,16 @@ class FeedScreenModel(
                     feedPreferences.selectedSource().changes(),
                     ::DisplayPrefs,
                 ).collect { prefs ->
+                    // Legacy "All" default (null) falls back to Popular at read
+                    // time; the All listing mode is removed from the UI.
+                    val defaultListing = prefs.defaultListing ?: FeedListing.POPULAR
                     mutableState.update {
                         it.copy(
                             showSourceSelector = prefs.showSource,
                             showListingSelector = prefs.showListing,
-                            defaultListing = prefs.defaultListing,
+                            defaultListing = defaultListing,
                             selectedSourceId = it.selectedSourceId ?: prefs.selectedSource,
-                            listingOverride = if (it.listingSelected) it.listingOverride else prefs.defaultListing,
+                            listingOverride = if (it.listingSelected) it.listingOverride else defaultListing,
                         )
                     }
                     // Restore the persisted source's filter list once (model

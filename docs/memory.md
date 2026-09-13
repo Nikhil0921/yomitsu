@@ -5270,3 +5270,93 @@ Total 44 files, +976/-242. Device evidence stays local
 (.device-pass/, gitignored).
 Session CLOSED.
 ```
+
+```text
+[COMPLETED 2026-09-13 — FEED UI CORRECTION (user-authorized follow-up to
+master session; supersedes stacked-selector layout), UNCOMMITTED]
+
+User prompt (docs/Prompt.md): remove listing "All", restore compact
+[Source][Popular][Latest] row, remove duplicate source/listing title,
+tighten header, collapse-on-scroll, correct settings Default listing,
+preserve genre chips + filtering + "All sources".
+
+AUDIT FIRST: FeedScreen.kt / FeedScreenModel.kt / FeedTab.kt /
+FeedPreferences / FeedModels / ManageFeedsScreen / state test traced.
+Key facts: "All" = listingOverride==null chip (FeedScreen.kt) + null
+defaultListing chip (customize dialog); FeedListing enum never had ALL
+(no migration possible/needed); "All sources" = SourceSelectorDropdown
+item (source selection, DIFFERENT concept, untouched); FeedHeader
+composable rendered per-section source+listing duplicate title.
+
+CHANGES (2 files):
+1. FeedScreen.kt:
+   - FilterBar moved INTO LazyVerticalGrid as first full-span grid item
+     (was Column-wrapped above grid) = collapse-on-scroll + return with
+     ZERO custom machinery (prompt §15 "reuse existing behavior" rung).
+   - FeedFilterBar rebuilt: single primary Row = SourceSelectorDropdown +
+     Popular + Latest FilterChips (horizontalScroll, CenterVertically);
+     All chip deleted; genre row below (unchanged semantics, honest
+     absence); spacing extraSmall (8dp edges align with grid insets).
+   - FeedHeader composable DELETED (duplicate title §13).
+   - Customize dialog Default listing: All chip removed (Popular/Latest).
+   - Unused imports dropped (ListGroupHeader).
+2. FeedScreenModel.kt: prefs collect maps legacy null defaultListing →
+   POPULAR at read (`?: FeedListing.POPULAR`) — smallest compatible
+   fallback, no migration, no new architecture (§10). selectedSourceId
+   / listingOverride restore paths unchanged.
+
+PRESERVED: visibleFeeds fallback semantics (null override still shows
+both listings if a feed set lacks the selected one — state test 9/9
+green untouched); Q2 Browse work untouched; genre chips (session-scoped
+filter leaves); "All sources" dropdown item; stable-width selector
+(textMeasurer max-width cap + ellipsis); AddFeedDialog; ManageFeeds
+(loadSectionsOnStart=false); withIOContext fetch fix.
+
+GATES GREEN 2026-09-13 (docker vsc-yomihon-e24e3bd…, JDK17, -Xmx4g, both
+volumes): spotlessApply→spotlessCheck + :app:compileDebugKotlin green;
+testDebugUnitTest + verifySqlDelightMigration BUILD SUCCESSFUL 2m59s;
+:app:assembleDebug BUILD SUCCESSFUL 3m26s. One compile fix mid-run
+(bottom val hoisted out of deleted Column block).
+
+DEVICE VERIFIED SM_M066B (debug app.yomihon.dev, 720px, wireless):
+- Layout: single row verified by bounds — selector [49,209], Popular
+  [363,209], Latest [512,209] SAME y; genre row y=300; no overlap.
+- All absent: zero "All" text nodes in Feed + customize dumps; "All
+  sources" dropdown item still present (§9 distinction held).
+- Single-select + data match (§18): Popular checked → romance set;
+  Latest checked → different latest set; both listings render distinct
+  results; highlighted listing = rendered data.
+- Genre chips: Kagane content-rating TriStates render selected (INCLUDE
+  default from source), Safe off→on roundtrip genuinely filters +
+  restores results; Thunder/Asura now expose filter leaves → chips shown
+  (source-side change; honest per-source).
+- Collapse: 3× swipe-down → selector/chips/genre all scrolled off
+  (GONE in dump); swipe-up → back at exact y=209/300. No jitter (bounds
+  identical before/after). App bar enterAlways already handled top bar.
+- Load more: tap appended next page (30 Years Since…, Academy's Genius
+  Swordmaster etc.).
+- Persistence: source + listing + default survive force-stop/restart
+  (Latest + Asura restored); Manage Feeds roundtrip (reselect path)
+  preserves state.
+- Legacy fallback: pref_feed_default_listing hand-emptied on device →
+  relaunch → Popular chip checked, no crash, no corruption (§10 verified
+  live). NOTE: sed surgery self-broke pref_feed_items mid-test (host
+  python repaired via /data/local/tmp + run-as cat); final state feeds
+  restored, defaultListing left EMPTY intentionally for this test.
+  User may want to re-set preferred default from the app UI.
+- No FATAL / NetworkOnMainThreadException in session logcat.
+
+DEVICE QUIRKS (documented): Facebook notifications/overlay repeatedly
+stole taps mid-session (tap landed in Messenger UI) — re-launch +
+statusbar collapse workaround from prior session still required;
+uiautomator dump occasionally returned stale/empty tree when racing app
+recomposition (re-dump after settle).
+
+Docs updated: ui-implementation-map.md §14.3 (rewritten to current
+contract), implementation-roadmap.md (§B current-task block, §C L-18
+master-session commit ledger row + L-19 feed correction, §M history
+entry), phase.md (pointer), memory.md (this block).
+
+Git: UNCOMMITTED (2 source files + 4 docs). No commit/tag/release per
+commit rule. Awaiting user commit decision.
+```
