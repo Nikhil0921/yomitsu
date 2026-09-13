@@ -49,7 +49,8 @@ class ManageFeedsScreen : Screen() {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { FeedScreenModel() }
+        // Management-only instance: skips per-feed network section fetches.
+        val screenModel = rememberScreenModel { FeedScreenModel(loadSectionsOnStart = false) }
         val state by screenModel.state.collectAsState()
 
         Scaffold(

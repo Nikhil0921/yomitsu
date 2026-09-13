@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -19,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
@@ -29,6 +31,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -50,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +69,7 @@ import eu.kanade.presentation.library.components.MangaComfortableGridItem
 import eu.kanade.presentation.library.components.MangaCompactGridItem
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
+import eu.kanade.tachiyomi.ui.browse.source.browse.isGenreSelected
 import eu.kanade.tachiyomi.ui.feed.FeedScreenModel
 import eu.kanade.tachiyomi.ui.feed.FeedSectionResult
 import tachiyomi.domain.manga.model.asMangaCover
@@ -78,6 +84,7 @@ import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.EmptyScreenAction
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.theme.header
+import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 @Composable
 fun FeedScreen(
@@ -88,6 +95,7 @@ fun FeedScreen(
     onAddFeedConfirm: (Long, FeedListing) -> Unit,
     onSelectSource: (Long?) -> Unit,
     onSelectListing: (FeedListing?) -> Unit,
+    onToggleGenre: (SourceModelFilter<*>) -> Unit,
     onDismissAddDialog: () -> Unit,
     onLoadMore: (FeedItem) -> Unit,
     onRetry: (FeedItem) -> Unit,
@@ -156,6 +164,7 @@ fun FeedScreen(
                 state = state,
                 onSelectSource = onSelectSource,
                 onSelectListing = onSelectListing,
+                onToggleGenre = onToggleGenre,
             )
             val bottom = padding.calculateBottomPadding()
             LazyVerticalGrid(
@@ -382,34 +391,42 @@ private fun FeedFilterBar(
     state: FeedScreenModel.State,
     onSelectSource: (Long?) -> Unit,
     onSelectListing: (FeedListing?) -> Unit,
+    onToggleGenre: (SourceModelFilter<*>) -> Unit,
 ) {
     val enabledFeeds = state.feeds.filter { it.enabled }
     val feedSources = enabledFeeds.map { it.sourceId }.distinct()
         .mapNotNull { id -> state.sources.firstOrNull { it.id == id } }
     val hasListings = enabledFeeds.map { it.listing }.distinct().size > 1
-    val showSelectorRow = (state.showSourceSelector && feedSources.size >= 2) ||
-        (state.showListingSelector && hasListings)
+    val hasSourceSelector = state.showSourceSelector && feedSources.size >= 2
+    val showSelectorRow = hasSourceSelector ||
+        (state.showListingSelector && hasListings) ||
+        state.genreToggles.isNotEmpty()
+    val genreToggles = state.genreToggles
 
     if (!showSelectorRow) return
 
-    Row(
+    // Stacked rows: selector chip on its own line, listing chips below with a
+    // clear gap (no touching/overlapping surfaces; stable footprint preserved).
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = MaterialTheme.padding.medium, vertical = MaterialTheme.padding.extraSmall),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = MaterialTheme.padding.medium),
+        verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
     ) {
-        if (state.showSourceSelector && feedSources.size >= 2) {
-            SourceSelectorDropdown(
-                state = state,
-                onSelectSource = onSelectSource,
-            )
+        if (hasSourceSelector) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SourceSelectorDropdown(
+                    state = state,
+                    onSelectSource = onSelectSource,
+                )
+            }
         }
         if (state.showListingSelector && hasListings) {
             Row(
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small, Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
             ) {
                 FilterChip(
                     selected = state.listingOverride == null,
@@ -426,6 +443,36 @@ private fun FeedFilterBar(
                     onClick = { onSelectListing(FeedListing.LATEST) },
                     label = { Text(stringResource(MR.strings.latest)) },
                 )
+            }
+        }
+        // Source-supported filter chips: shown only when the selected source
+        // actually exposes toggleable Filter leaves (honest absence).
+        if (genreToggles.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            ) {
+                genreToggles.forEach { filter ->
+                    val selected = filter.isGenreSelected()
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onToggleGenre(filter) },
+                        leadingIcon = if (selected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                        label = { Text(filter.name) },
+                    )
+                }
             }
         }
     }
@@ -474,11 +521,16 @@ private fun SourceSelectorDropdown(
             },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            val selectedLabel = stringResource(MR.strings.selected)
+            val notSelectedLabel = stringResource(MR.strings.not_selected)
             DropdownMenuItem(
                 text = { Text(stringResource(MR.strings.feed_all_sources)) },
                 onClick = {
                     onSelectSource(null)
                     expanded = false
+                },
+                modifier = Modifier.semantics {
+                    stateDescription = if (selected == null) selectedLabel else notSelectedLabel
                 },
                 trailingIcon = {
                     if (selected == null) Icon(Icons.Outlined.Check, contentDescription = null)
@@ -490,6 +542,9 @@ private fun SourceSelectorDropdown(
                     onClick = {
                         onSelectSource(source.id)
                         expanded = false
+                    },
+                    modifier = Modifier.semantics {
+                        stateDescription = if (selected?.id == source.id) selectedLabel else notSelectedLabel
                     },
                     trailingIcon = {
                         if (selected?.id == source.id) Icon(Icons.Outlined.Check, contentDescription = null)

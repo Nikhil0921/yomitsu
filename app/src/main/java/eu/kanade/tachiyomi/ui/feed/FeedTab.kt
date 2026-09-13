@@ -59,6 +59,7 @@ data object FeedTab : Tab {
             onAddFeedConfirm = { sourceId, listing -> screenModel.addFeed(sourceId, listing) },
             onSelectSource = { screenModel.selectSource(it) },
             onSelectListing = { screenModel.selectListing(it) },
+            onToggleGenre = { screenModel.toggleGenreChip(it) },
             onDismissAddDialog = { screenModel.dismissAddDialog() },
             onLoadMore = { screenModel.loadMore(it) },
             onRetry = { screenModel.retry(it) },

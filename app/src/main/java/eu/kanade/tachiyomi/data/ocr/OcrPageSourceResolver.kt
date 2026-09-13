@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.ocr
 import android.graphics.Bitmap
 import android.graphics.Rect
 import eu.kanade.domain.chapter.model.toSChapter
+import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
@@ -12,7 +13,9 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
+import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
@@ -24,6 +27,7 @@ internal class OcrPageSourceResolver(
     private val sourceManager: SourceManager,
     private val downloadManager: DownloadManager,
     private val pageSourceGateway: OcrPageSourceGateway,
+    private val chapterCache: ChapterCache,
 ) {
     suspend fun resolve(
         manga: Manga,
@@ -101,7 +105,15 @@ internal class OcrPageSourceResolver(
         source: HttpSource,
         chapter: Chapter,
     ): ResolvedOcrPages {
-        val pages = source.getPageList(chapter.toSChapter())
+        // The reader's HttpPageLoader already persists the page list in
+        // ChapterCache when the chapter is open; reuse it instead of another
+        // network round trip (falls back to the source on miss).
+        val cachedPages = try {
+            chapterCache.getPageListFromCache(chapter)
+        } catch (_: Exception) {
+            null
+        }
+        val pages = (cachedPages ?: source.getPageList(chapter.toSChapter()))
             .mapIndexed { index, page -> Page(index, page.url, page.imageUrl, page.uri) }
             .map { page ->
                 OcrPageInput(
@@ -131,8 +143,25 @@ internal class OcrPageSourceResolver(
             if (page.imageUrl.isNullOrBlank()) {
                 page.imageUrl = source.getImageUrl(page)
             }
-            source.getImage(page).use { response ->
-                decode(response.body.byteStream())
+            // The viewer (Coil/HttpPageLoader) already saved the displayed
+            // page's image into ChapterCache; read it from disk instead of a
+            // cacheless re-download when present.
+            val imageUrl = page.imageUrl
+            if (imageUrl != null && chapterCache.isImageInCache(imageUrl)) {
+                val file = chapterCache.getImageFile(imageUrl)
+                try {
+                    file.inputStream().use { decode(it) }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    logcat(LogPriority.DEBUG) { "OCR cached image decode failed, refetching page=${page.index}" }
+                    source.getImage(page).use { response ->
+                        decode(response.body.byteStream())
+                    }
+                }
+            } else {
+                source.getImage(page).use { response ->
+                    decode(response.body.byteStream())
+                }
             }
         }
     }

@@ -9,6 +9,10 @@ import eu.kanade.domain.feed.model.FeedListing
 import eu.kanade.domain.feed.service.FeedPreferences
 import eu.kanade.domain.source.interactor.GetEnabledSources
 import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.ui.browse.source.browse.genreToggles
+import eu.kanade.tachiyomi.ui.browse.source.browse.isGenreSelected
+import eu.kanade.tachiyomi.ui.browse.source.browse.toggleGenreSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
@@ -16,12 +20,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.domain.manga.model.toDomainManga
+import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 sealed interface FeedSectionResult {
     data object Loading : FeedSectionResult
@@ -42,6 +48,7 @@ private data class DisplayPrefs(
 )
 
 class FeedScreenModel(
+    private val loadSectionsOnStart: Boolean = true,
     private val sourceManager: SourceManager = Injekt.get(),
     private val getEnabledSources: GetEnabledSources = Injekt.get(),
     private val networkToLocalManga: NetworkToLocalManga = Injekt.get(),
@@ -64,6 +71,10 @@ class FeedScreenModel(
         val showSourceSelector: Boolean = true,
         val showListingSelector: Boolean = true,
         val defaultListing: FeedListing? = null,
+        // Session-scoped source filters (genre chips): the selected source's
+        // own toggleable Filter leaves. Empty = source has none (or no source
+        // selected) → UI honestly shows no chip row.
+        val genreToggles: List<SourceModelFilter<*>> = emptyList(),
     ) {
         val visibleFeeds: List<FeedItem>
             get() {
@@ -85,6 +96,11 @@ class FeedScreenModel(
 
     private var sectionJobs: MutableMap<FeedItem, Job> = mutableMapOf()
 
+    // The selected source's live FilterList (genre chips mutate its leaves'
+    // state in place). Session-scoped: not persisted (Feed architecture keeps
+    // display prefs in FeedPreferences; filter chips are transient queries).
+    private var sourceFilterList: FilterList? = null
+
     val gridColumns = feedPreferences.gridColumns().asState(screenModelScope)
 
     val compactGrid = feedPreferences.compactGrid().asState(screenModelScope)
@@ -94,7 +110,9 @@ class FeedScreenModel(
             launch {
                 feedPreferences.feeds().changes().collect { feeds ->
                     mutableState.update { it.copy(feeds = feeds) }
-                    loadSections(feeds)
+                    // Management screens pass loadSectionsOnStart=false: they only
+                    // read feeds/mutations, so skip the per-feed network fetches.
+                    if (loadSectionsOnStart) loadSections(feeds)
                 }
             }
             launch {
@@ -113,6 +131,18 @@ class FeedScreenModel(
                             selectedSourceId = it.selectedSourceId ?: prefs.selectedSource,
                             listingOverride = if (it.listingSelected) it.listingOverride else prefs.defaultListing,
                         )
+                    }
+                    // Restore the persisted source's filter list once (model
+                    // init / process recreation) so the chip row survives.
+                    if (sourceFilterList == null) {
+                        val restored = state.value.selectedSourceId
+                        if (restored != null) {
+                            sourceFilterList = (sourceManager.get(restored) as? CatalogueSource)
+                                ?.getFilterList()
+                            mutableState.update { s ->
+                                s.copy(genreToggles = sourceFilterList?.genreToggles().orEmpty())
+                            }
+                        }
                     }
                 }
             }
@@ -170,30 +200,44 @@ class FeedScreenModel(
     ): FeedSectionResult {
         val source = sourceManager.get(feed.sourceId) as? CatalogueSource
             ?: return FeedSectionResult.Error(null)
-        return try {
-            val pageResult = when (feed.listing) {
-                FeedListing.POPULAR -> source.getPopularManga(page)
-                FeedListing.LATEST -> source.getLatestUpdates(page)
-            }
-            val freshMangas = pageResult.mangas
-                .map { it.toDomainManga(source.id) }
-                .let { networkToLocalManga(it) }
-            val mangas = if (appendTo == null) {
-                freshMangas.distinctBy { it.url }
-            } else {
-                (appendTo.mangas + freshMangas).distinctBy { it.url }
-            }
-            FeedSectionResult.Success(
-                mangas = mangas,
-                hasMore = pageResult.hasNextPage,
-            )
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            logcat(LogPriority.DEBUG) { "Feed fetch failed source=${feed.sourceId} page=$page" }
-            if (appendTo != null) {
-                appendTo.copy(isLoadingMore = false)
-            } else {
-                FeedSectionResult.Error(e.message)
+        return withIOContext {
+            try {
+                // Source-supported filtering: when genre chips are active for
+                // this feed's source, route through the source's own search
+                // listing with its FilterList (source keeps AND/OR semantics).
+                val activeFilters = sourceFilterList.takeIf {
+                    feed.sourceId == state.value.selectedSourceId && it != null
+                }
+                val pageResult = if (activeFilters != null &&
+                    activeFilters.genreToggles().any { it.isGenreSelected() }
+                ) {
+                    source.getSearchManga(page, "", activeFilters)
+                } else {
+                    when (feed.listing) {
+                        FeedListing.POPULAR -> source.getPopularManga(page)
+                        FeedListing.LATEST -> source.getLatestUpdates(page)
+                    }
+                }
+                val freshMangas = pageResult.mangas
+                    .map { it.toDomainManga(source.id) }
+                    .let { networkToLocalManga(it) }
+                val mangas = if (appendTo == null) {
+                    freshMangas.distinctBy { it.url }
+                } else {
+                    (appendTo.mangas + freshMangas).distinctBy { it.url }
+                }
+                FeedSectionResult.Success(
+                    mangas = mangas,
+                    hasMore = pageResult.hasNextPage,
+                )
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.DEBUG) { "Feed fetch failed source=${feed.sourceId} page=$page" }
+                if (appendTo != null) {
+                    appendTo.copy(isLoadingMore = false)
+                } else {
+                    FeedSectionResult.Error(e.message)
+                }
             }
         }
     }
@@ -208,7 +252,44 @@ class FeedScreenModel(
 
     fun selectSource(sourceId: Long?) {
         feedPreferences.selectedSource().set(sourceId)
-        mutableState.update { it.copy(selectedSourceId = sourceId) }
+        // Load the newly selected source's own filter list for the chip row.
+        // No refetch: source selection filters already-loaded sections
+        // client-side (visibleFeeds); genre chips apply at fetch time.
+        sourceFilterList = (sourceId?.let { sourceManager.get(it) } as? CatalogueSource)
+            ?.getFilterList()
+        mutableState.update {
+            it.copy(
+                selectedSourceId = sourceId,
+                genreToggles = sourceFilterList?.genreToggles().orEmpty(),
+            )
+        }
+    }
+
+    /**
+     * Toggle a source-filter genre chip: flips the source's own filter leaf
+     * (TriState INCLUDE↔IGNORE, CheckBox on/off) and re-fetches page 1 of the
+     * visible sections with the updated filter list.
+     */
+    fun toggleGenreChip(filter: SourceModelFilter<*>) {
+        if (!filter.toggleGenreSelection()) return
+        mutableState.update { it.copy(genreToggles = sourceFilterList?.genreToggles().orEmpty()) }
+        refetchAllSections()
+    }
+
+    private fun refetchAllSections() {
+        val feeds = state.value.visibleFeeds
+        mutableState.update { state ->
+            state.copy(
+                sections = feeds.associateWith { FeedSectionResult.Loading },
+            )
+        }
+        feeds.forEach { feed ->
+            sectionJobs.remove(feed)?.cancel()
+            sectionJobs[feed] = screenModelScope.launch {
+                val result = fetchSection(feed, page = 1)
+                mutableState.update { it.copy(sections = it.sections + (feed to result)) }
+            }
+        }
     }
 
     fun selectListing(listing: FeedListing?) {

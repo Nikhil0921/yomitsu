@@ -314,7 +314,7 @@ class DomainModule : InjektModule {
         addFactory { UpdateOcrExclusionZoneText(get()) }
         addSingletonFactory { OcrScanStore(get<Application>(), get()) }
         addSingletonFactory<OcrPageSourceGateway> { OcrPageSourceGatewayImpl(get<Application>(), get(), get()) }
-        addSingletonFactory { OcrPageSourceResolver(get(), get(), get()) }
+        addSingletonFactory { OcrPageSourceResolver(get(), get(), get(), get()) }
         addSingletonFactory { ReaderSelectionCropper(get()) }
         addSingletonFactory { OcrScanNotifier(get<Application>()) }
         addSingletonFactory { OcrChapterScanner(get<Application>(), get(), get(), get(), get(), get(), get(), get()) }
