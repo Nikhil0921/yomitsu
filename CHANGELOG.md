@@ -10,6 +10,46 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Fixed` - for any bug fixes.
 - `Other` - for technical stuff.
 
+## [v0.5.4.1] - 2026-09-13
+
+### Changed
+- Reworked the Feed controls: one compact row with the source selector, Popular
+  and Latest chips (the redundant "All" listing option is gone), no duplicate
+  source/listing header above sections, tighter spacing, and the whole control
+  bar now scrolls away with the grid and returns on scroll-up
+- Default listing setting now offers Popular / Latest only; a missing or legacy
+  value safely falls back to Popular
+- Moved Text Recognition, Dictionary lookup, and Manage dictionaries into a new
+  "Studies" card on the More tab; OCR queue screen regrouped into organized cards
+
+### Added
+- Genre quick-filter chips in Browse and Feed for sources that expose toggleable
+  filters (absent when a source has none)
+
+### Improved
+- Feed sections no longer perform network fetches on the main thread (this
+  caused crashes with some sources)
+- Manage Feeds screen no longer triggers unnecessary network fetches in the
+  background
+- Read-Aloud first-page latency reduced: chapter page lists and page images are
+  now read from the chapter cache instead of re-fetched, and cached OCR results
+  are matched per OCR model so cache hits work reliably
+- Feed listing and genre-filter selections persist across restarts
+- Updates tab shows its sort/filter controls above the empty state when a
+  filter hides all updates
+- Accessibility: state descriptions on sliders, source selectors, and the
+  Read-Aloud speed menu; drag-and-drop category reordering now exposes
+  move-up/move-down actions to screen readers; several list rows no longer clip
+  at large font scales
+- Settings Search reliably finds the Reader toolbar and App language screens
+
+### Fixed
+- Fix Read-Aloud resuming from the wrong sentence after changing pages while
+  paused
+- Fix prefetch scans continuing into the next chapter after an automatic
+  chapter advance
+- Fix TTS voice application failures going unnoticed (now checked and logged)
+
 ## [v0.5.4] - 2026-09-12
 
 ### Added

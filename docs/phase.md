@@ -5,7 +5,26 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **MASTER CLOSEOUT AUDIT 2026-09-13 COMPLETE — all
+Current phase pointer: **RELEASE CANDIDATE v0.5.4.1 PREPARED 2026-09-13 —
+  version bumped 0.5.4→0.5.4.1 / versionCode 30→31 (app/build.gradle.kts,
+  single source of truth), CHANGELOG entry added. All 4 gates GREEN in one
+  chained run (docker vsc-yomihon-e24e3bd…, JDK17 -Xmx4g: spotlessCheck +
+  testDebugUnitTest + verifySqlDelightMigration + :app:assembleDebug,
+  3m37s). APK metadata verified: versionName=0.5.4.1-8288 (debug suffix =
+  commit count), versionCode=31, applicationId=app.yomihon.dev, arm64
+  APK fresh-built 14:52. Device smoke PASS on SM_M066B (wireless
+  192.168.29.98:5555): install OK, package metadata matches (0.5.4.1-8288
+  / vc31), launch clean 0 FATAL/0 ANR session-wide, Feed full matrix
+  (single [Source][Popular][Latest] row y=209, no All chip, Popular/Latest
+  data-distinct + checked-state verified, genre Action chip filter
+  roundtrip, collapse-on-scroll + return), Browse sources render,
+  Library cards + filter sheet + long-press menu, More = Studies card +
+  grouped cards, Settings search live ("read"→results, "language"→App
+  language findable = BUG-010 registration verified), Reader/TTS smoke
+  (engine connected, voice applied ×3, GLENS OCR service cycles), About
+  shows Debug {sha} per debug-build convention. AWAITING user commit/tag/
+  push/GitHub-release authorization. No git action taken.**
+  Prior: MASTER CLOSEOUT AUDIT 2026-09-13 COMPLETE — all
   authorized work VERIFIED, tree COMMITTED as 35a78cb7e (Feed UI correction
   + docs, user-committed), tree clean. Closeout re-ran all 4 gates green
   (docker JDK17 -Xmx4g: spotlessCheck + testDebugUnitTest +

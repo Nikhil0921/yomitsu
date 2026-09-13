@@ -5459,3 +5459,99 @@ L. RELEASE READINESS: versionName 0.5.4 / versionCode 30 — INCREMENTED
 Session discipline held: no new features, no Liquid Background, no new
 UI work, no speculative cleanup, no renumbering. STOP after report.
 ```
+
+```text
+[COMPLETED 2026-09-13 — RELEASE CANDIDATE v0.5.4.1 PREPARED, UNCOMMITTED]
+
+Session type: release-candidate preparation per user brief (v0.5.5 renamed
+to 0.5.4.1 by user mid-session — patch release, versionCode 31). Scope
+lock held: no new features, no Q3-Q8, no Liquid Background, no blur, no
+AnymeX expansion, no protected-architecture changes, no speculative
+cleanup. No git commit/tag/push/release performed (user decision).
+
+A. BASELINE AUDIT: main @ 607646553 (docs-only descendant of approved
+   35a78cb7e), tree clean, tags end at v0.5.4 (no stray v0.5.5 tag).
+   Post-v0.5.4 = 10 committed commits: Q2 genre chips (345fcb67d), bug
+   register BUG-003/004/005/006/008 (ed368bf6a), Feed fix + ChapterCache
+   latency (0553a8a78), Q9 a11y + BUG-010 (81811dcd8), Studies card +
+   grouped OCR queue + updates empty-state (4f7a9e51b), docs (64e0103af,
+   d41a46ae2), Feed UI correction (35a78cb7e), roadmap/memory docs
+   (607646553). Only DB-adjacent change: ocr_cache.sq getPage gains
+   `AND ocr_model = :ocrModel` predicate (query-only, no schema change,
+   no migration, part of approved BUG-004 commit). No dependency changes.
+
+B. VERSION BUMP (2 files):
+   - app/build.gradle.kts: versionCode 30→31, versionName 0.5.4→0.5.4.1
+     (single source of truth; About reads BuildConfig, no other version
+     sites; README has zero version refs).
+   - CHANGELOG.md: [v0.5.4.1] - 2026-09-13 entry — Feed compact controls
+     row + All-option removal + header dedup + collapse-on-scroll,
+     Default listing Popular/Latest only + legacy fallback, Studies card,
+     genre quick-filter chips (Browse+Feed), Feed main-thread fetch fix,
+     Manage-Feeds waste fix, ChapterCache/preload latency, persistence,
+     Updates empty-state controls, a11y stateDescriptions + category drag
+     actions + large-font fixes, Settings Search fixes, TTS/OCR bug
+     fixes (003/005/006). No GLENS-latency-eliminated claim; no deferred
+     features advertised.
+
+C. GATES GREEN (docker vsc-yomihon-e24e3bd…, JDK17, -Xmx4g, both
+   volumes), single chained run: spotlessCheck + testDebugUnitTest +
+   verifySqlDelightMigration + :app:assembleDebug BUILD SUCCESSFUL 3m37s.
+
+D. APK AUDIT: app/build/outputs/apk/debug/ 5 ABIs, arm64 95,150,697 B,
+   built 14:52 fresh. output-metadata: versionCode=31, versionName=
+   0.5.4.1-8288 (debug -{commitCount} suffix by design), applicationId
+   app.yomihon.dev (debug .dev suffix).
+
+E. DEVICE VERIFICATION SM_M066B (wireless 192.168.29.98:5555, debug
+   install Success, dumpsys package: versionCode=31 versionName=
+   0.5.4.1-8288 = APK-metadata match, no UI/APK mismatch):
+   - Launch clean, session 0 FATAL / 0 ANR (.device-pass on-device
+     capture /sdcard/rc-v0541.log, 20MB).
+   - FEED PASS: single row [Asura Scans▼][Popular][Latest] all y=209;
+     0 "All" chips; Popular→Latest data-distinct (title sets differ) +
+     checked-state on parent nodes verified; genre Action chip tap →
+     checked=true + chips shifted (refetch) + list changed to Action
+     titles (Doctor's Rebirth, Genius Martial Arts Trainer etc.);
+     collapse-on-scroll (selector+chips GONE in dump) + return-on-scroll
+     up; Manage sources + Add feed icons present.
+   - BROWSE PASS: Sources/Extensions/Migrate tabs, source list renders
+     (AllManga/Asura/Atsumaru/Kagane/…). (Q2 chip matrix already
+     device-verified 2026-09-13, not re-run.)
+   - LIBRARY PASS: cards + category chips render; filter sheet opens;
+     long-press opens per-manga menu (selection mechanics functional).
+   - MORE PASS: Studies card (Text Recognition/Dictionary/Dictionaries);
+     Library card with live queue subtitle "Paused • 5 remaining";
+     Settings/About/Help rows.
+   - SETTINGS PASS: root renders all groups; Settings Search live
+     ("read" → Read aloud button, Reader>… results; "language" → App
+     language findable = BUG-010 unindexed registration verified);
+     navigation into Read aloud & voice screen OK.
+   - READER/TTS SMOKE PASS: Villain To Kill ch1 opens (1/16, webtoon);
+     Read aloud tapped → TextToSpeech bound to com.google.android.tts,
+     "TTS voice applied name=en-us-x-iom-local" ×3 (BUG-006 log live),
+     GLENS OCR service bind/unbind cycles (chimera ocr.service START
+     ×2), no speak failures. Architecture untouched (smoke only).
+   - OCR SMOKE PASS: GLENS service exercised in TTS path (above);
+     recognition pipeline from master-session evidence + this session's
+     clean cycles.
+   - ABOUT: "Debug 607646553" per debug-build convention (AboutScreen
+     shows Stable {VERSION_NAME} on release builds — correct, no
+     mismatch).
+   - Device quirks (known): PIN lock interrupt → user unlocked; Facebook
+     overlay + notification shade stole taps/focus twice → dismissed;
+     LeakCanary LeakLauncherActivity intercepted one relaunch (debug
+     noise, known issue #13) → backed out; one rotation dialog opened by
+     stray tap → dismissed.
+
+F. DOCS RECONCILED: phase.md pointer (this release-candidate state),
+   memory.md (this block). roadmap/ui-map unchanged (no new UI work —
+   release prep only). Docs state 0.5.4.1 release candidate prepared;
+   tag/GitHub-release NOT marked done.
+
+DEFERRED (retained): Q3-Q8 = HALTED; Liquid Background = DEFERRED;
+   true backdrop blur = REJECTED; AnymeX = separate track.
+
+STATUS: RELEASE CANDIDATE READY. Awaiting explicit user authorization
+for commit / tag / push / GitHub Release.
+```
