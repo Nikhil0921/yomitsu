@@ -5255,8 +5255,18 @@ register 003–010 statuses, §M history), memory.md (this block +
 device results), phase.md (pointer), ui-implementation-map.md (§30
 addendum: new surfaces, no D-item changes).
 
-Git: UNCOMMITTED (user commit decision, U-2 precedent). Includes Q2
-uncommitted work underneath — commit as separate logical commits if
-user wants.
-Next: device pass → final §33 report → user review.
+Git: COMMITTED 2026-09-13 by user authorization (6 logical commits on
+top of b2f1da316):
+- 345fcb67d feat(browse): genre-chip quick filters (Q2)
+- ed368bf6a fix(tts/ocr): bug register fixes BUG-003/004/005/006/008
+- 0553a8a78 fix(feed): main-thread fetch, mgmt-screen waste, genre
+  chips, selector spacing (+ OCR/TTS ChapterCache latency)
+- 81811dcd8 feat(a11y): Q9 completion batch + settings search fixes
+  (BUG-010)
+- 4f7a9e51b feat(ui): Studies card, grouped OCR queue, updates
+  empty-state controls
+- 64e0103af docs: record master session (+ ANYMEX-SCREENSHOT refs)
+Total 44 files, +976/-242. Device evidence stays local
+(.device-pass/, gitignored).
+Session CLOSED.
 ```
