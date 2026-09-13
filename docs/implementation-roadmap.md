@@ -104,7 +104,7 @@ CURRENT AUTHORIZED TASK:
 | L-16 | 2026-09-11/12 | Artwork-reactive reader tray (stream-wait fix + 20%/2.5× tuning) | 0434d07a1 (in v0.5.4) | gates green + device-scripted verify | /tmp/opencode/toned-menu-v2.png etc. |
 | L-17 | 2026-09-12 | Q2 genre-chip search (BrowseSourceScreen chip row over source Filter leaves + 10 unit tests) | UNCOMMITTED (2 src files + 1 test file + docs) | gates green; device Q2-01..09 PASS on SM_M066B (build 0.5.4-8281) | .device-pass/q2/ dumps + this §M |
 | L-18 | 2026-09-13 | Master session: Q9 a11y + BUG-003..010 + Tscan fix + OCR/TTS ChapterCache + Feed genre chips + AnymeX micro-passes | 345fcb67d..64e0103af (6 commits, user-authorized) | gates green + device-verified | §M history 2026-09-13; .device-pass/master-session-*.log |
-| L-19 | 2026-09-13 | Feed UI correction: remove `All` listing, compact [Source][Popular][Latest] row, remove duplicate section header, collapse-on-scroll (filter bar as grid item), legacy null→Popular fallback | UNCOMMITTED (FeedScreen.kt + FeedScreenModel.kt + docs) | gates green + device-verified (matrix §M) | uiautomator dumps feed-*.xml session 09-13 |
+| L-19 | 2026-09-13 | Feed UI correction: remove `All` listing, compact [Source][Popular][Latest] row, remove duplicate section header, collapse-on-scroll (filter bar as grid item), legacy null→Popular fallback | COMMITTED as 35a78cb7e (FeedScreen.kt + FeedScreenModel.kt + docs); closeout-audited 2026-09-13 (gates re-green, device smoke PASS, pref caveat resolved) | gates green + device-verified (matrix §M) | uiautomator dumps feed-*.xml session 09-13 |
 
 ---
 

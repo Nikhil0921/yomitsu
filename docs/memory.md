@@ -5357,6 +5357,105 @@ contract), implementation-roadmap.md (§B current-task block, §C L-18
 master-session commit ledger row + L-19 feed correction, §M history
 entry), phase.md (pointer), memory.md (this block).
 
-Git: UNCOMMITTED (2 source files + 4 docs). No commit/tag/release per
-commit rule. Awaiting user commit decision.
+Git: committed by user as 35a78cb7e (2 source files + docs incl.
+Prompt.md). Closeout audit session (below) verified the commit, re-ran
+all gates green, and resolved the empty-defaultListing device caveat.
+```
+
+```text
+[COMPLETED 2026-09-13 — MASTER CLOSEOUT AUDIT + RELEASE-READINESS
+VERIFICATION, UNCOMMITTED (docs only)]
+
+Session type: closeout audit per user master-closeout brief. NO code
+changes required — correct outcome achieved.
+
+A. REPOSITORY INTEGRITY: branch main @ 35a78cb7e (Feed correction
+   committed by user, includes docs/Prompt.md + memory/phase/roadmap/
+   ui-map updates; commit-tree clean, zero uncommitted code). Previous
+   "uncommitted @ d41a46ae2" state superseded by that user commit.
+   No Q2 files touched by it (BrowseSourceScreen/Model, GenreTogglesTest
+   all clean). No protected architecture changed, no dependency
+   changes, no new .sqm migrations, no tag/release created.
+
+B. FEED CORRECTION VERIFIED against source: FeedListing enum =
+   {POPULAR, LATEST} (no ALL, never had); persisted legacy null
+   defaultListing → Popular at read (FeedScreenModel.kt:128
+   `?: FeedListing.POPULAR`); Customize exposes Popular/Latest only
+   (FeedScreen.kt:599-608); filter bar = [Source][Popular][Latest]
+   single row + genre row (horizontalScroll); duplicate section header
+   gone (no FeedHeader/source title in sections — grep clean); FilterBar
+   = first LazyVerticalGrid item (collapse-on-scroll, no nested scroll
+   container, no custom collapse framework); visibleFeeds fallback
+   semantics + paging/retry/persistence intact (9/9 state tests).
+   "All sources" dropdown item retained (§9 distinction held).
+
+C. Q9 VERIFIED present: CategoryListItem customActions moveUp/moveDown;
+   BaseSliderItem stateDescription=valueString; SourceSelectorDropdown
+   menu stateDescription; TtsPlaybackBar speed stateDescription;
+   heightIn(min=56.dp) ×4 (ClearDatabase/CommonMangaItem/UpdatesUiItem/
+   BaseMangaListItem). No regression.
+
+D. BUG REGISTER: 003 PASS (Paused page-change → resumeIndex=0,
+   TtsPlaybackController.kt:432); 004 PASS (OcrCacheStore.getPage
+   ocrModel predicate, no migration); 005 PASS (NextChapter →
+   prefetchJob?.cancel(), :469); 006 PASS (setVoice ×2 SUCCESS checks);
+   007 NO-ACTION/UNREACHABLE (guard intact); 008 PASS (no-op
+   clickable gone from DictionaryComponents); 009 PASS
+   (loadSectionsOnStart=false, ManageFeedsScreen.kt:53); 010 PASS
+   (synchronous settingScreens index + unindexedSettingScreens
+   registration incl. OcrExclusions/Dictionary/ReaderToolbar/AppLanguage).
+
+E. TSCAN: fetchSection wrapped withIOContext (FeedScreenModel.kt:206).
+
+F. OCR/TTS LATENCY: OcrPageSourceResolver — getPageListFromCache-first
+   (:111-116), ChapterCache image reuse (:150-153), decode-fail →
+   refetch fallback with CE rethrow (:154-160), all inside withIOContext.
+   Verdict retained: app-side duplicate fetches deduped; residual
+   first-page latency = external GLENS/service round-trip (NOT claimed
+   solved).
+
+G. TESTS: 9 Feed state tests + 10 GenreTogglesTest green in full
+   testDebugUnitTest run; no new tests needed (UI/layout change only,
+   deterministic state paths already covered).
+
+H. GATES (closeout re-run, docker vsc-yomihon-e24e3bd…, JDK17, -Xmx4g,
+   both volumes): spotlessCheck + testDebugUnitTest +
+   verifySqlDelightMigration + :app:assembleDebug BUILD SUCCESSFUL 3m11s
+   (single chained run; MigratorTest + DictionaryTermCardTest visible
+   PASSED in tail).
+
+I. DEVICE SM_M066B (0.5.4-8286, current tree): focused smoke PASS —
+   Feed renders [Source▼][Popular][Latest] single row (y=209-241 all
+   chips); no All chip; Popular/Latest data-distinct + selection
+   verified on parent checkable nodes (uiautomator quirk: Text child
+   carries no checked attr — parent checkable node does; stale dumps
+   twice, re-dump pattern from memory reused); collapse-on-scroll +
+   return-on-scroll-up verified; Manage Feeds opens/lists; force-stop
+   restart → source + listing + default persisted; 0 FATAL, 0
+   NetworkOnMainThreadException in session logcat.
+   LeakCanary dump-screen interrupted one restart cycle (known debug
+   noise, dismissed, no app impact).
+
+J. DEVICE-PREF CAVEAT RESOLVED (brief §15): Feed Settings UI → Default
+   listing → Latest tapped; pref persisted as
+   pref_feed_default_listing=LATEST (verified via run-as shared_prefs
+   read), survived force-stop/restart, feed renders Latest data with
+   Latest chip checked. Empty/missing pref still falls back to Popular
+   (code path intact, FeedScreenModel.kt:128). No manual pref surgery.
+
+K. DOCS RECONCILED: this block + phase.md pointer + roadmap L-19 row
+   updated UNCOMMITTED→COMMITTED 35a78cb7e + closeout status. Audited
+   ui-implementation-map.md §14.3 (matches current contract), roadmap
+   (Q3-Q8 HALTED held, Liquid DESIGNED/DEFERRED held, true blur
+   REJECTED held, AnymeX separate track held).
+
+L. RELEASE READINESS: versionName 0.5.4 / versionCode 30 — INCREMENTED
+   BEYOND released tag v0.5.4 (vc29 era). Working tree contains 6
+   post-v0.5.4 commits not in any release. NOT READY to release without:
+   user review of 35a78cb7e + roadmap decision on next version bump
+   (0.5.5/vc31?) + usual release process (user-authorized only). No
+   commit/tag/push/release performed by this session.
+
+Session discipline held: no new features, no Liquid Background, no new
+UI work, no speculative cleanup, no renumbering. STOP after report.
 ```

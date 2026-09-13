@@ -5,9 +5,16 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **FEED UI CORRECTION 2026-09-13 COMPLETE — code +
-  gates green + DEVICE-VERIFIED, UNCOMMITTED awaiting user commit decision.
-  Scope (user-authorized, supersedes stacked-selector layout): `All`
+Current phase pointer: **MASTER CLOSEOUT AUDIT 2026-09-13 COMPLETE — all
+  authorized work VERIFIED, tree COMMITTED as 35a78cb7e (Feed UI correction
+  + docs, user-committed), tree clean. Closeout re-ran all 4 gates green
+  (docker JDK17 -Xmx4g: spotlessCheck + testDebugUnitTest +
+  verifySqlDelightMigration + :app:assembleDebug, 3m11s), device smoke
+  SM_M066B 0.5.4-8286 PASS, device-pref caveat RESOLVED via app UI
+  (default listing set to Latest, persisted across restart). Ready for
+  user review. No release action taken.
+  Scope of the committed Feed UI correction (user-authorized, supersedes
+  stacked-selector layout): `All`
   listing chip removed from Feed + Customize→Default listing; legacy null
   defaultListing → Popular fallback at read (no migration); compact
   [Source][Popular][Latest] primary row (horizontalScroll narrow fallback,
