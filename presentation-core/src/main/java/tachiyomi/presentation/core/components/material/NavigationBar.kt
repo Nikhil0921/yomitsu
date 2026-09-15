@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import tachiyomi.presentation.core.theme.asChromeContainer
+import tachiyomi.presentation.core.theme.asNavContainer
 
 /**
  * M3 Navbar with no horizontal spacer, drawn as a floating elevated pill
@@ -28,7 +28,7 @@ import tachiyomi.presentation.core.theme.asChromeContainer
 @Composable
 fun NavigationBar(
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer.asChromeContainer(),
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer.asNavContainer(),
     contentColor: Color = MaterialTheme.colorScheme.contentColorFor(containerColor),
     tonalElevation: Dp = 3.dp,
     windowInsets: WindowInsets = WindowInsets.navigationBars,

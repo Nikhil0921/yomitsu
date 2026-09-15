@@ -14,6 +14,8 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,8 +39,12 @@ fun TabbedScreen(
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Enter-always: title row collapses on scroll-down, returns on scroll-up;
+    // PrimaryTabRow stays pinned under it.
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
     Scaffold(
+        topBarScrollBehavior = topBarScrollBehavior,
         topBar = {
             val tab = tabs[state.currentPage]
             val searchEnabled = tab.searchEnabled
@@ -49,6 +55,7 @@ fun TabbedScreen(
                 searchQuery = if (searchEnabled) searchQuery else null,
                 onChangeSearchQuery = onChangeSearchQuery,
                 actions = { AppBarActions(tab.actions) },
+                scrollBehavior = topBarScrollBehavior,
             )
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },

@@ -2,6 +2,7 @@ package tachiyomi.presentation.core.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
@@ -11,14 +12,36 @@ import androidx.compose.ui.graphics.Color
  */
 val LocalTranslucentSurfaces = staticCompositionLocalOf { false }
 
-// Container alpha for translucent chrome. Pre-blended with the theme
-// background (see [asChromeContainer]) so content behind stays legible
-// while the surface still reads as see-through.
+/**
+ * Active root background treatment: solid themes provide null (screens
+ * use their default opaque Scaffold color); gradient mode provides a
+ * theme-derived brush drawn behind all screen content.
+ */
+val LocalAppBackground = staticCompositionLocalOf<Brush?> { null }
+
+/**
+ * Bottom navigation translucency: 0 = opaque pill, otherwise the
+ * pre-blend alpha for the navigation chrome (bounded 0.55..0.92 so
+ * icons/text stay readable).
+ */
+val LocalNavTranslucency = staticCompositionLocalOf { 0f }
+
 private const val TRANSLUCENT_CONTAINER_ALPHA = 0.82f
 
-// Alpha for reader floating chrome. No pre-blend: the backdrop there is
-// the manga artwork itself, so see-through shows content.
 private const val FLOATING_CHROME_ALPHA = 0.85f
+
+// Bounded navigation-pill translucency range; beyond this text/icons suffer.
+private const val NAV_TRANSLUCENCY_MIN = 0.55f
+private const val NAV_TRANSLUCENCY_MAX = 0.92f
+
+/**
+ * Maps a 0..100 intensity preference to the bounded nav translucency
+ * alpha range. Pure — usable outside composition.
+ */
+fun navTranslucencyAlpha(intensityPercent: Int): Float {
+    val t = (intensityPercent.coerceIn(0, 100)) / 100f
+    return NAV_TRANSLUCENCY_MIN + (NAV_TRANSLUCENCY_MAX - NAV_TRANSLUCENCY_MIN) * t
+}
 
 /**
  * Chrome container color for the current mode: translucent (pre-blended
@@ -28,12 +51,29 @@ private const val FLOATING_CHROME_ALPHA = 0.85f
 @androidx.compose.runtime.Composable
 fun Color.asChromeContainer(): Color {
     if (!LocalTranslucentSurfaces.current) return this
+    return asPreBlendedContainer(TRANSLUCENT_CONTAINER_ALPHA)
+}
+
+/**
+ * Navigation-pill container color: user-controlled translucency via
+ * [LocalNavTranslucency] (0 = opaque). Real bounded alpha — the pill
+ * floats inset from the screen edge, so what shows through is the app
+ * background/gradient, not dense content (readability stays safe).
+ */
+@androidx.compose.runtime.Composable
+fun Color.asNavContainer(): Color {
+    val translucency = LocalNavTranslucency.current
+    if (translucency <= 0f) return this
+    return copy(alpha = translucency)
+}
+
+@androidx.compose.runtime.Composable
+private fun Color.asPreBlendedContainer(alpha: Float): Color {
     val background = MaterialTheme.colorScheme.background
-    val a = TRANSLUCENT_CONTAINER_ALPHA
     return Color(
-        red = red * a + background.red * (1 - a),
-        green = green * a + background.green * (1 - a),
-        blue = blue * a + background.blue * (1 - a),
+        red = red * alpha + background.red * (1 - alpha),
+        green = green * alpha + background.green * (1 - alpha),
+        blue = blue * alpha + background.blue * (1 - alpha),
         alpha = 1f,
     )
 }

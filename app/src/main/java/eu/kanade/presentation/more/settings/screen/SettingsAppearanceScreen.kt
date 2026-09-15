@@ -11,6 +11,7 @@ import androidx.core.app.ActivityCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.domain.ui.model.BackgroundStyle
 import eu.kanade.domain.ui.model.TabletUiMode
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
@@ -38,7 +39,90 @@ object SettingsAppearanceScreen : SearchableSettings {
 
         return listOf(
             getThemeGroup(uiPreferences = uiPreferences),
+            getNavigationGroup(uiPreferences = uiPreferences),
+            getBackgroundGroup(uiPreferences = uiPreferences),
             getDisplayGroup(uiPreferences = uiPreferences),
+        )
+    }
+
+    @Composable
+    private fun getNavigationGroup(
+        uiPreferences: UiPreferences,
+    ): Preference.PreferenceGroup {
+        val navigator = LocalNavigator.currentOrThrow
+        val navTranslucentPref = uiPreferences.navBarTranslucent
+        val navTranslucent by navTranslucentPref.collectAsState()
+        val navIntensityPref = uiPreferences.navBarTranslucency
+        val navIntensity by navIntensityPref.collectAsState()
+
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_navigation),
+            preferenceItems = buildList {
+                add(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_navigation_tabs),
+                        subtitle = stringResource(MR.strings.pref_navigation_tabs_summary),
+                        onClick = { navigator.push(SettingsNavigationScreen()) },
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = uiPreferences.immersiveMode,
+                        title = stringResource(MR.strings.pref_immersive_mode),
+                        subtitle = stringResource(MR.strings.pref_immersive_mode_summary),
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = navTranslucentPref,
+                        title = stringResource(MR.strings.pref_nav_bar_translucent),
+                        subtitle = stringResource(MR.strings.pref_nav_bar_translucent_summary),
+                    ),
+                )
+                if (navTranslucent) {
+                    add(
+                        Preference.PreferenceItem.SliderPreference(
+                            value = navIntensity,
+                            title = stringResource(MR.strings.pref_nav_bar_translucency),
+                            valueRange = 0..100,
+                            onValueChanged = { navIntensityPref.set(it) },
+                        ),
+                    )
+                }
+            },
+        )
+    }
+
+    @Composable
+    private fun getBackgroundGroup(
+        uiPreferences: UiPreferences,
+    ): Preference.PreferenceGroup {
+        val backgroundPref = uiPreferences.backgroundStyle
+        val background by backgroundPref.collectAsState()
+        val gradientIntensityPref = uiPreferences.backgroundGradientIntensity
+        val gradientIntensity by gradientIntensityPref.collectAsState()
+
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_background),
+            preferenceItems = buildList {
+                add(
+                    Preference.PreferenceItem.ListPreference(
+                        preference = backgroundPref,
+                        entries = BackgroundStyle.entries.associateWith { stringResource(it.titleRes) },
+                        title = stringResource(MR.strings.pref_category_background),
+                    ),
+                )
+                if (background == BackgroundStyle.GRADIENT) {
+                    add(
+                        Preference.PreferenceItem.SliderPreference(
+                            value = gradientIntensity,
+                            title = stringResource(MR.strings.pref_background_gradient_intensity),
+                            valueRange = 0..100,
+                            onValueChanged = { gradientIntensityPref.set(it) },
+                        ),
+                    )
+                }
+            },
         )
     }
 

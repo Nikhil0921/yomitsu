@@ -524,6 +524,45 @@
         <item name="colorSurfaceContainerHighest">@color/monochrome_surfaceContainerHighest</item>
     </style>
 
+    <!--== Frosted Theme ==-->
+    <style name="Theme.Tachiyomi.Frosted">
+        <!-- Theme Colors -->
+        <item name="colorPrimary">@color/frosted_primary</item>
+        <item name="colorOnPrimary">@color/frosted_onPrimary</item>
+        <item name="colorPrimaryContainer">@color/frosted_primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/frosted_onPrimaryContainer</item>
+        <item name="colorSecondary">@color/frosted_secondary</item>
+        <item name="colorOnSecondary">@color/frosted_onSecondary</item>
+        <item name="colorSecondaryContainer">@color/frosted_secondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/frosted_onSecondaryContainer</item>
+        <item name="colorTertiary">@color/frosted_tertiary</item>
+        <item name="colorOnTertiary">@color/frosted_onTertiary</item>
+        <item name="colorTertiaryContainer">@color/frosted_tertiaryContainer</item>
+        <item name="colorOnTertiaryContainer">@color/frosted_onTertiaryContainer</item>
+        <item name="colorError">@color/frosted_error</item>
+        <item name="colorOnError">@color/frosted_onError</item>
+        <item name="colorErrorContainer">@color/frosted_errorContainer</item>
+        <item name="colorOnErrorContainer">@color/frosted_onErrorContainer</item>
+        <item name="android:colorBackground">@color/frosted_background</item>
+        <item name="colorOnBackground">@color/frosted_onBackground</item>
+        <item name="colorSurface">@color/frosted_surface</item>
+        <item name="colorOnSurface">@color/frosted_onSurface</item>
+        <item name="colorSurfaceVariant">@color/frosted_surfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/frosted_onSurfaceVariant</item>
+        <item name="colorOutline">@color/frosted_outline</item>
+        <item name="colorOutlineVariant">@color/frosted_outlineVariant</item>
+        <item name="colorSurfaceInverse">@color/frosted_inverseSurface</item>
+        <item name="colorOnSurfaceInverse">@color/frosted_inverseOnSurface</item>
+        <item name="colorPrimaryInverse">@color/frosted_inversePrimary</item>
+        <item name="colorSurfaceDim">@color/frosted_surfaceDim</item>
+        <item name="colorSurfaceBright">@color/frosted_surfaceBright</item>
+        <item name="colorSurfaceContainerLowest">@color/frosted_surfaceContainerLowest</item>
+        <item name="colorSurfaceContainerLow">@color/frosted_surfaceContainerLow</item>
+        <item name="colorSurfaceContainer">@color/frosted_surfaceContainer</item>
+        <item name="colorSurfaceContainerHigh">@color/frosted_surfaceContainerHigh</item>
+        <item name="colorSurfaceContainerHighest">@color/frosted_surfaceContainerHighest</item>
+    </style>
+
     <!--== AMOLED Mode Overlay ==-->
     <style name="ThemeOverlay.Tachiyomi.Amoled" parent="" />
 

@@ -660,6 +660,114 @@ Device clock = host + ~5h29m (log timestamps 12:54+ ↔ file mtime ~07:30).
 ## In progress
 
 ```text
+[COMPLETED 2026-09-13 — ADAPTIVE UI & PERSONALIZATION master batch, UNCOMMITTED]
+User-authorized via master prompt (supersedes roadmap "nav customization
+REJECT" + "Liquid DEFERRED" locks for THIS scope: reorder ≠ 6th tab / IA
+change; gradient ≠ Liquid's rejected blur). AnymeX = reference only.
+
+Implemented (all gates green 3m14s: spotlessCheck + testDebugUnitTest +
+verifySqlDelightMigration + :app:assembleDebug; NavTabTest 9/9):
+
+A. IMMERSIVE MODE — pref_immersive_mode (default false); MainActivity
+   LaunchedEffect hides/shows systemBars via WindowInsetsControllerCompat
+   with BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE (gesture nav safe, no trap:
+   toggle off restores). ReaderActivity untouched (own fullscreen pref).
+B. BOTTOM NAV REORDER — NavTab enum (:domain ui.model) = identity, NOT
+   visual position/TabOptions.index; pref_nav_tab_order CSV; parseOrder()
+   never loses/dupes a tab, malformed→default (9 unit tests). HomeScreen
+   orderedTabs() from pref (live apply); NavigationBar + NavigationRail
+   both iterate ordered list; TabNavigator start = first ordered tab
+   (ponytail: live reorder doesn't relaunch nav; restart moves start tab).
+   SettingsNavigationScreen (ReaderToolbar drag pattern: ReorderableItem
+   + draggableHandle + move customActions a11y) — registered in settings
+   search index. 5 tabs kept, reselect semantics untouched.
+C. FEED DRAG REORDER — ManageFeedsScreen rebuilt as reorderable
+   ElevatedCard rows (was PreferenceGroupCard + up/down arrows); drag
+   handle + a11y move actions retained; enable/delete/toggle/identity
+   preserved; FeedScreenModel.moveFeedTo(from,to) = same pref-list
+   mutation as old buttons (no network on drag; sections keyed by
+   FeedItem data class = order-safe).
+D. COLLAPSIBLE CHROME — Feed = prior grid-item collapse (kept); Library
+   already conditional; RecentTab + TabbedScreen (Browse) switched to
+   enterAlwaysScrollBehavior (title collapses, PrimaryTabRow pinned);
+   More = no header (N/A); reader untouched.
+E/F. TRANSLUCENT NAV + INTENSITY — pref_nav_bar_translucent (default
+   false) + pref_nav_bar_translucency (0..100, default 60 → bounded
+   alpha 0.55..0.92 via navTranslucencyAlpha()); NavigationBar pill
+   uses new Color.asNavContainer() (real bounded alpha, pill floats over
+   gradient only). LocalNavTranslucency provided by TachiyomiTheme.
+G/H. BACKGROUND GRADIENT — BackgroundStyle enum (SOLID default /
+   GRADIENT) + pref_background_style + pref_background_gradient_intensity
+   (0..100, default 35). Brush = theme-derived background→surfaceContainerLow
+   vertical lerp (semantic roles; AMOLED/Monet/Frosted all derive
+   automatically; 0 ≈ solid). LocalAppBackground provided by
+   TachiyomiTheme; presentation-core Scaffold draws brush via drawBehind
+   when non-null (containerColor→Transparent); AppBars stay opaque =
+   readable chrome. No per-frame work (remember(pref-set)).
+I. FROSTED THEME — AppTheme.FROSTED + FrostedColorScheme (cool
+   blue-grey editorial, light+dark) + colors_frosted.xml ×2 +
+   Theme.Tachiyomi.Frosted + themeResources entry; auto-enables
+   translucent chrome while active (isTranslucent = pref || FROSTED).
+   Appears in theme picker after Monochrome (entries-driven).
+J. DIALOG/SHEET ADAPTATION — audited: AdaptiveSheet/ResizableSheet/
+   TabbedDialog already route asChromeContainer/asFrostedModal;
+   AlertDialogs = M3 defaults; Frosted = colorscheme swap → all
+   surfaces follow. No frost-on-frost (content panels untouched).
+K. DOWNLOAD QUEUE — already grouped (FlexibleAdapter sections +
+   MaterialCardView headers + drag enabled); OcrQueueScreen already
+   PreferenceGroupCard (09-13 micro-batch). Documented, no change.
+
+PREF KEYS: pref_immersive_mode, pref_nav_tab_order, pref_nav_bar_
+translucent, pref_nav_bar_translucency, pref_background_style,
+pref_background_gradient_intensity. No DB change (migration gate green).
+i18n: +13 base strings (nav group, background group, immersive, frosted
+theme). No locale hand-edits.
+
+Files changed (20): UiPreferences.kt, AppTheme.kt, BackgroundStyle.kt(new),
+NavTab.kt(new), NavTabTest.kt(new), FrostedColorScheme.kt(new),
+colors_frosted.xml ×2(new), themes.xml, ThemingDelegate.kt,
+TachiyomiTheme.kt, Translucent.kt, Scaffold.kt, NavigationBar.kt(pcore),
+HomeScreen.kt, SettingsAppearanceScreen.kt, SettingsNavigationScreen.kt
+(new), SettingsSearchScreen.kt, ManageFeedsScreen.kt, FeedScreenModel.kt,
+RecentTab.kt, TabbedScreen.kt, MainActivity.kt, strings.xml.
+
+Device verification matrix PENDING user (needs SM_M066B session).
+```
+
+```text
+[COMPLETED 2026-09-13 — ADAPTIVE UI corrective fix batch (post-audit), UNCOMMITTED]
+Read-only audit found 3 batch-introduced defects; all fixed, smallest diffs:
+
+1. ISSUE-001 (P1) nav translucency OFF rendered 55% alpha:
+   TachiyomiTheme passed navTranslucencyAlpha(0)=0.55f (MIN bound) when
+   toggle OFF. FIX: gate on boolean — OFF → 0f (asNavContainer treats
+   <=0f as opaque, verified downstream), ON → bounded 0.55..0.92 via
+   unchanged navTranslucencyAlpha(). navIntensity now read unconditionally
+   (no if-collapse into slider). Preview stays 0f.
+2. ISSUE-002 (P2) ManageFeeds LazyColumn key = FeedItem data class
+   (contains mutable `enabled`; toggle mid-drag = key change). FIX: key =
+   "sourceId:listing" (stable immutable identity; same source CAN have
+   POPULAR+LATEST so pair, not sourceId alone). ReorderableItem key
+   matched. Drag/toggle/delete logic untouched.
+3. ISSUE-003 (P3) FrostedColorScheme missing slots vs XML palette:
+   added error/onError/errorContainer/onErrorContainer, outlineVariant,
+   scrim, surfaceDim, surfaceBright (dark+light, values = exact XML
+   frosted_* source of truth). Also removed duplicate-inversePrimary
+   compile dupes during edit (2× "Argument already passed" caught by
+   gates, fixed). Error family included — sibling schemes all define it,
+   XML has frosted_error.
+
+GATES GREEN 2026-09-13 (devcontainer JDK17, -Xmx4g, both volumes):
+  spotlessCheck + testDebugUnitTest + verifySqlDelightMigration +
+  :app:assembleDebug BUILD SUCCESSFUL 5m49s (one prior red run: forgot
+  gradle-home volume → dep resolution fail; one red run: dup params,
+  fixed). arm64 APK 20:08.
+DEVICE VERIFICATION PENDING (same SM_M066B matrix as master batch).
+Files changed (3): TachiyomiTheme.kt, ManageFeedsScreen.kt,
+  FrostedColorScheme.kt.
+```
+
+```text
 v0.5.2 RELEASE PUBLISHED 2026-09-03 (tag v0.5.2, 5 ABI APKs, Latest).
 - Version bumped 0.5.2/28 (commit 0286d9081 "chore(release): bump version to
   0.5.2 (versionCode 28)" + CHANGELOG.md entry), tagged, pushed, release

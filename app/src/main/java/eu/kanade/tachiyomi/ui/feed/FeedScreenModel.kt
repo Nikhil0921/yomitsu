@@ -352,6 +352,20 @@ class FeedScreenModel(
 
     fun moveFeedDown(feed: FeedItem) = moveFeed(feed, 1)
 
+    /**
+     * Drag-reorder: move the feed at [from] to [to] (indices in the full
+     * persisted list). Same persistence path as the move buttons; no
+     * network fetch is triggered by a reorder (sections are keyed by
+     * FeedItem, order-independent).
+     */
+    fun moveFeedTo(from: Int, to: Int) {
+        val feeds = feedPreferences.feeds().get().toMutableList()
+        if (from !in feeds.indices || to !in feeds.indices || from == to) return
+        val item = feeds.removeAt(from)
+        feeds.add(to, item)
+        feedPreferences.feeds().set(feeds)
+    }
+
     private fun moveFeed(feed: FeedItem, delta: Int) {
         val feeds = feedPreferences.feeds().get().toMutableList()
         val index = feeds.indexOfFirst { it.sourceId == feed.sourceId && it.listing == feed.listing }

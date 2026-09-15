@@ -306,6 +306,11 @@ private val unindexedSettingScreens = listOf(
         subtitleRes = MR.strings.pref_reader_customize_toolbar_summary,
     ),
     UnindexedSettingScreen(
+        screen = SettingsNavigationScreen(),
+        titleRes = MR.strings.pref_navigation_tabs,
+        subtitleRes = MR.strings.pref_navigation_tabs_summary,
+    ),
+    UnindexedSettingScreen(
         screen = AppLanguageScreen(),
         titleRes = MR.strings.pref_app_language,
         subtitleRes = null,

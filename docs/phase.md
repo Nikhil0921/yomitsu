@@ -5,13 +5,21 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **ANYMEX UI MODERNIZATION MICRO-BATCH EXECUTED
-  2026-09-13 (user-authorized, post-v0.5.4.1) — 5 visual corrections
-  (DS-01/02/03/06 + FeedCustomizeDialog 12dp rhythm), gates green,
-  device smoke PASS SM_M066B, UNCOMMITTED awaiting user review/commit.
-  Scope locks held: Liquid DEFERRED, blur REJECTED, IA regroup NO,
-  nav NO, Q3-Q8 HALTED. Next per roadmap queue: Q3 recursive
-  dictionary lookup design pass (U-5).**
+Current phase pointer: **ADAPTIVE UI & PERSONALIZATION BATCH EXECUTED
+  2026-09-13 (user-authorized master prompt; supersedes nav-reorder/
+  background locks for this scope): immersive mode, bottom-nav drag
+  reorder (NavTab identity model + 9 tests), Feed drag reorder,
+  translucent nav pill + intensity, theme-derived background gradient +
+  intensity, Frosted theme, collapsing headers (Recent/Browse enter-
+  always). All 4 gates green. UNCOMMITTED awaiting user review; device
+  matrix PENDING. Prior: ANYMEX UI MICRO-BATCH 2026-09-13 (5 visual
+  corrections, gates green, device smoke PASS, UNCOMMITTED); v0.5.4.1
+  RELEASED 2026-09-13 (commit 2af00b105, tag pushed, GitHub Latest).
+  Scope locks still held: Liquid full track DEFERRED, true blur
+  REJECTED, IA regroup NO, 6th tab NO, Q3-Q8 HALTED (nav-reorder +
+  background-gradient unlocked for THIS batch only per user master
+  prompt). Next per roadmap queue: Q3 recursive dictionary lookup
+  design pass (U-5).**
   Prior: **v0.5.4.1 RELEASED 2026-09-13 (user-authorized).
   Commit 2af00b105 (version bump 0.5.4.1/vc31 + CHANGELOG + docs), tag
   v0.5.4.1 pushed, GitHub Latest release published with 5 ABI APKs

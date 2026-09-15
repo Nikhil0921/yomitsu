@@ -37,7 +37,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
@@ -47,6 +50,7 @@ import androidx.compose.ui.unit.max
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastMap
 import androidx.compose.ui.util.fastMaxBy
+import tachiyomi.presentation.core.theme.LocalAppBackground
 import kotlin.math.max
 
 /**
@@ -115,8 +119,22 @@ fun Scaffold(
 ) {
     // Tachiyomi: Handle consumed window insets
     val remainingWindowInsets = remember { MutableWindowInsets() }
+    // Yomitsu: theme-derived background treatment — when gradient mode is
+    // active the Scaffold surface turns transparent and draws the shared
+    // app-background brush instead of a flat color.
+    val appBackground = LocalAppBackground.current
+    val backgroundDrawn = appBackground != null
     androidx.compose.material3.Surface(
         modifier = Modifier
+            .then(
+                if (appBackground != null) {
+                    Modifier.drawBehind {
+                        drawRect(brush = appBackground, size = Size(size.width, size.height), style = Fill)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .nestedScroll(topBarScrollBehavior.nestedScrollConnection)
             .onConsumedWindowInsetsChanged {
                 remainingWindowInsets.insets = contentWindowInsets.exclude(
@@ -124,7 +142,7 @@ fun Scaffold(
                 )
             }
             .then(modifier),
-        color = containerColor,
+        color = if (backgroundDrawn) Color.Transparent else containerColor,
         contentColor = contentColor,
     ) {
         ScaffoldLayout(

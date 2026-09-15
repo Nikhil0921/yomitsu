@@ -23,6 +23,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -34,6 +35,8 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabNavigator
 import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.domain.ui.model.NavTab
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
@@ -56,6 +59,7 @@ import tachiyomi.presentation.core.components.material.NavigationBar
 import tachiyomi.presentation.core.components.material.NavigationRail
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.pluralStringResource
+import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -71,6 +75,8 @@ object HomeScreen : Screen() {
     @Suppress("ConstPropertyName")
     private const val TabNavigatorKey = "HomeTabs"
 
+    // Default visual order; the persisted user order (NavTab names) is
+    // resolved per composition so live reordering from settings applies.
     private val TABS = listOf(
         LibraryTab,
         RecentTab,
@@ -79,11 +85,33 @@ object HomeScreen : Screen() {
         MoreTab,
     )
 
+    private val tabsByNavTab: Map<NavTab, eu.kanade.presentation.util.Tab> = mapOf(
+        NavTab.LIBRARY to LibraryTab,
+        NavTab.RECENT to RecentTab,
+        NavTab.FEED to FeedTab,
+        NavTab.BROWSE to BrowseTab,
+        NavTab.MORE to MoreTab,
+    )
+
+    @Composable
+    private fun orderedTabs(): List<eu.kanade.presentation.util.Tab> {
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val order by uiPreferences.navTabOrder.collectAsState()
+        return remember(order) {
+            val tabs = NavTab.parseOrder(order).mapNotNull { tabsByNavTab[it] }
+            if (tabs.size == TABS.size) tabs else TABS
+        }
+    }
+
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val orderedTabs = orderedTabs()
+        // ponytail: TabNavigator keeps the first tab as start tab; reordering
+        // while the screen is alive does not relaunch navigation, only the
+        // pill/rail order updates. Restart applies a new start tab.
         TabNavigator(
-            tab = LibraryTab,
+            tab = orderedTabs.firstOrNull() ?: LibraryTab,
             key = TabNavigatorKey,
         ) { tabNavigator ->
             // Provide usable navigator to content screen
@@ -92,7 +120,7 @@ object HomeScreen : Screen() {
                     startBar = {
                         if (isTabletUi()) {
                             NavigationRail {
-                                TABS.fastForEach {
+                                orderedTabs.fastForEach {
                                     NavigationRailItem(it)
                                 }
                             }
@@ -109,7 +137,7 @@ object HomeScreen : Screen() {
                                 exit = shrinkVertically(),
                             ) {
                                 NavigationBar {
-                                    TABS.fastForEach {
+                                    orderedTabs.fastForEach {
                                         NavigationBarItem(it)
                                     }
                                 }

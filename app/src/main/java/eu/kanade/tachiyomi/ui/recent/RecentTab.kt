@@ -13,6 +13,8 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -75,12 +77,14 @@ data object RecentTab : Tab {
         val context = LocalContext.current
 
         // One screen-level title; the Scaffold's AppBar handles the status-bar
-        // inset so the tab row starts below the safe area.
+        // inset so the tab row starts below the safe area. Enter-always keeps
+        // the tab row pinned while the title collapses on scroll.
+        val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
         Scaffold(
-            topBar = { scrollBehavior ->
+            topBar = { _ ->
                 AppBar(
                     title = stringResource(MR.strings.label_recent),
-                    scrollBehavior = scrollBehavior,
+                    scrollBehavior = topBarScrollBehavior,
                 )
             },
             snackbarHost = {
