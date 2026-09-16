@@ -13,11 +13,23 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import tachiyomi.presentation.core.theme.asNavContainer
+
+/**
+ * Total bottom clearance of the floating navigation pill, provided by the
+ * host that renders it ([HomeScreen]) and folded into [Scaffold] content
+ * padding / bottom-anchored slots by nested screen Scaffolds. This lets
+ * scrollable content extend under the translucent pill while resting
+ * clearance and bottom bars/FAB/snackbars stay anchored above it.
+ * Cleared to 0.dp by [Scaffold] for its own content, so nesting never
+ * double-counts it.
+ */
+val LocalNavPillBottomInset = staticCompositionLocalOf { 0.dp }
 
 /**
  * M3 Navbar with no horizontal spacer, drawn as a floating elevated pill

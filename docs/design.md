@@ -213,7 +213,13 @@ backdrop exists, pre-blend elsewhere, opaque when the preference is off.
 
 ONE conceptual group = ONE visual surface: `PreferenceGroupCard`
 (`surfaceContainerLow`, `shapes.large`, header inside the surface,
-rows flat within, tonal only — no shadow, no frost, no per-row cards).
+rows flat within, tonal only — no shadow, no frost, no outline, no
+per-row cards). Separation from the background is guaranteed by the
+gradient itself: the radial glow peaks at 55% blend toward
+`surfaceContainerLow` and decays back to `background` at the corners,
+so no card ever sits on its own tone (the old linear gradient ended
+exactly at `surfaceContainerLow` at the bottom stop, washing cards
+out in Teal & Turquoise, Taco, AMOLED).
 Adopted by PreferenceScreen (all SearchableSettings screens),
 SettingsMainScreen sections, MoreScreen, AboutScreen, OCR exclusions.
 Section semantics over card count; spacing rhythm 16/12dp. Monochrome

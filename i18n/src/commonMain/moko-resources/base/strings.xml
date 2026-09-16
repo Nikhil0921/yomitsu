@@ -86,6 +86,7 @@
     <string name="action_disable_all">Disable all</string>
     <string name="action_edit">Edit</string>
     <string name="action_expand">Expand</string>
+    <string name="action_collapse">Collapse</string>
     <string name="action_add">Add</string>
     <string name="action_update_category">Update category</string>
     <string name="action_open_random_manga">Open random entry</string>

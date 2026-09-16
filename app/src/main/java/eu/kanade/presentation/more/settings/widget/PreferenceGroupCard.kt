@@ -19,7 +19,9 @@ import tachiyomi.presentation.core.theme.header
  * One conceptual group = one visual surface. Settings groups render as
  * tonal grouped-surface containers with the group header inside the
  * surface, rows flat within. Solid (never frosted): settings are
- * long-form readable content.
+ * long-form readable content. Group boxes stay distinct from the
+ * background because the radial gradient peak is capped below the
+ * surfaceContainerLow tone (see appBackgroundBrush) — no outline needed.
  */
 @Composable
 internal fun PreferenceGroupCard(

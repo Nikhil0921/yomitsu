@@ -2,6 +2,7 @@ package eu.kanade.presentation.history
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ fun HistoryScreen(
     onClickResume: (mangaId: Long, chapterId: Long) -> Unit,
     onClickFavorite: (mangaId: Long) -> Unit,
     onDialogChange: (HistoryScreenModel.Dialog?) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     state.list.let {
         if (it == null) {
@@ -69,6 +71,7 @@ fun HistoryScreen(
                 } else {
                     HistoryScreenContent(
                         history = it,
+                        contentPadding = contentPadding,
                         onClickCover = { history -> onClickCover(history.mangaId) },
                         onClickResume = { history -> onClickResume(history.mangaId, history.chapterId) },
                         onClickDelete = { item -> onDialogChange(HistoryScreenModel.Dialog.Delete(item)) },
@@ -127,12 +130,13 @@ private fun HistoryControls(
 @Composable
 private fun HistoryScreenContent(
     history: List<HistoryUiModel>,
+    contentPadding: PaddingValues,
     onClickCover: (HistoryWithRelations) -> Unit,
     onClickResume: (HistoryWithRelations) -> Unit,
     onClickDelete: (HistoryWithRelations) -> Unit,
     onClickFavorite: (HistoryWithRelations) -> Unit,
 ) {
-    FastScrollLazyColumn {
+    FastScrollLazyColumn(contentPadding = contentPadding) {
         items(
             items = history,
             key = { "history-${it.hashCode()}" },

@@ -4,6 +4,7 @@ import androidx.compose.animation.graphics.res.animatedVectorResource
 import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -92,11 +93,14 @@ data object RecentTab : Tab {
                 SnackbarHost(hostState = resumeHostState)
             },
         ) { padding ->
+            // Floating pill: no bottom clip here — the pages get the pill
+            // clearance as list content padding so content scrolls under the
+            // translucent pill and rests clear above it, exactly like Library,
+            // Feed and Browse.
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = padding.calculateTopPadding())
-                    .padding(bottom = padding.calculateBottomPadding()),
+                    .padding(top = padding.calculateTopPadding()),
             ) {
                 PrimaryTabRow(selectedTabIndex = state.currentPage, modifier = Modifier.zIndex(1f)) {
                     tabs.forEachIndexed { index, tab ->
@@ -117,7 +121,11 @@ data object RecentTab : Tab {
                     state = state,
                     verticalAlignment = Alignment.Top,
                 ) { page ->
-                    tabs[page].content(padding, snackbarHostState, state)
+                    tabs[page].content(
+                        PaddingValues(bottom = padding.calculateBottomPadding()),
+                        snackbarHostState,
+                        state,
+                    )
                 }
             }
         }

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,7 +68,9 @@ fun UpdateScreen(
     onUpdateSelected: (UpdatesItem, Boolean, Boolean) -> Unit,
     onOpenChapter: (UpdatesItem) -> Unit,
     onFilterClicked: () -> Unit,
+    onToggleGroupExpand: (Long) -> Unit,
     hasActiveFilters: Boolean,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     BackHandler(enabled = state.selectionMode) {
         onSelectAll(false)
@@ -113,7 +116,7 @@ fun UpdateScreen(
                     },
                     enabled = !state.selectionMode,
                 ) {
-                    FastScrollLazyColumn {
+                    FastScrollLazyColumn(contentPadding = contentPadding) {
                         // Page-level controls; the Recent host provides the
                         // screen title.
                         item(key = "updates_controls") {
@@ -138,6 +141,7 @@ fun UpdateScreen(
                             onClickCover = onClickCover,
                             onClickUpdate = onOpenChapter,
                             onDownloadChapter = onDownloadChapter,
+                            onToggleGroupExpand = onToggleGroupExpand,
                         )
                     }
                 }
@@ -155,7 +159,9 @@ fun UpdateScreen(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = contentPadding.calculateBottomPadding()),
         )
     }
 }
@@ -274,4 +280,9 @@ private fun UpdatesBottomBar(
 sealed interface UpdatesUiModel {
     data class Header(val date: LocalDate) : UpdatesUiModel
     data class Item(val item: UpdatesItem) : UpdatesUiModel
+    data class Group(
+        val mangaId: Long,
+        val items: List<UpdatesItem>,
+        val expanded: Boolean,
+    ) : UpdatesUiModel
 }

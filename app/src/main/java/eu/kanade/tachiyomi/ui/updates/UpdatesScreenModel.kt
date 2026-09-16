@@ -449,6 +449,7 @@ class UpdatesScreenModel(
         val isLoading: Boolean = true,
         val hasActiveFilters: Boolean = false,
         val items: List<UpdatesItem> = listOf(),
+        val expandedGroupIds: Set<Long> = emptySet(),
         val dialog: Dialog? = null,
     ) {
         val selected = items.filter { it.selected }
@@ -466,6 +467,18 @@ class UpdatesScreenModel(
                         else -> null
                     }
                 }
+                .let { groupConsecutiveUpdates(it, expandedGroupIds) }
+        }
+    }
+
+    fun toggleUpdatesGroup(mangaId: Long) {
+        mutableState.update { state ->
+            val expanded = if (mangaId in state.expandedGroupIds) {
+                state.expandedGroupIds - mangaId
+            } else {
+                state.expandedGroupIds + mangaId
+            }
+            state.copy(expandedGroupIds = expanded)
         }
     }
 
@@ -486,6 +499,57 @@ private fun TriState.toBooleanOrNull(): Boolean? {
         TriState.ENABLED_IS -> true
         TriState.ENABLED_NOT -> false
     }
+}
+
+/**
+ * Folds runs of 2+ consecutive same-manga items into a collapsible group;
+ * date headers always break a run so a group never spans days. Single
+ * updates and different-manga neighbors stay flat rows.
+ */
+internal fun groupConsecutiveUpdates(
+    uiModels: List<UpdatesUiModel>,
+    expandedGroupIds: Set<Long>,
+): List<UpdatesUiModel> {
+    val result = ArrayList<UpdatesUiModel>(uiModels.size)
+    var run = mutableListOf<UpdatesItem>()
+
+    fun flushRun() {
+        if (run.size >= 2) {
+            val mangaId = run.first().update.mangaId
+            result.add(
+                UpdatesUiModel.Group(
+                    mangaId = mangaId,
+                    items = run.toList(),
+                    expanded = mangaId in expandedGroupIds,
+                ),
+            )
+        } else {
+            run.forEach { result.add(UpdatesUiModel.Item(it)) }
+        }
+        run = mutableListOf()
+    }
+
+    uiModels.forEach { model ->
+        when (model) {
+            is UpdatesUiModel.Item -> {
+                if (run.isNotEmpty() && run.last().update.mangaId != model.item.update.mangaId) {
+                    flushRun()
+                }
+                run.add(model.item)
+            }
+            is UpdatesUiModel.Header -> {
+                flushRun()
+                result.add(model)
+            }
+            is UpdatesUiModel.Group -> {
+                flushRun()
+                result.add(model)
+            }
+        }
+    }
+    flushRun()
+
+    return result
 }
 
 @Immutable

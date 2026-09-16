@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,12 +50,12 @@ private val ContinueItemHeight = 96.dp
 
 fun Screen.continueTab(): RecentTabContent = RecentTabContent(
     titleRes = MR.strings.recent_tab_continue,
-) { _, _, _ ->
-    ContinueContent()
+) { contentPadding, _, _ ->
+    ContinueContent(contentPadding)
 }
 
 @Composable
-private fun Screen.ContinueContent() {
+private fun Screen.ContinueContent(contentPadding: PaddingValues) {
     val screenModel = rememberScreenModel { ContinueScreenModel() }
     val state by screenModel.state.collectAsState()
     val navigator = LocalNavigator.currentOrThrow
@@ -63,7 +64,7 @@ private fun Screen.ContinueContent() {
     when {
         state.isLoading -> LoadingScreen()
         else -> {
-            FastScrollLazyColumn {
+            FastScrollLazyColumn(contentPadding = contentPadding) {
                 // Compact page-level controls; content stays the hero. Rendered
                 // even when the filtered list is empty so the filter/sort can
                 // always be toggled back.

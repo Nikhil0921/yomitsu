@@ -758,14 +758,160 @@ Read-only audit found 3 batch-introduced defects; all fixed, smallest diffs:
    XML has frosted_error.
 
 GATES GREEN 2026-09-13 (devcontainer JDK17, -Xmx4g, both volumes):
-  spotlessCheck + testDebugUnitTest + verifySqlDelightMigration +
-  :app:assembleDebug BUILD SUCCESSFUL 5m49s (one prior red run: forgot
-  gradle-home volume → dep resolution fail; one red run: dup params,
-  fixed). arm64 APK 20:08.
-DEVICE VERIFICATION PENDING (same SM_M066B matrix as master batch).
-Files changed (3): TachiyomiTheme.kt, ManageFeedsScreen.kt,
-  FrostedColorScheme.kt.
+   spotlessCheck + testDebugUnitTest + verifySqlDelightMigration +
+   :app:assembleDebug BUILD SUCCESSFUL 5m49s (one prior red run: forgot
+   gradle-home volume → dep resolution fail; one red run: dup params,
+   fixed). arm64 APK 20:08.
+ DEVICE VERIFICATION PENDING (same SM_M066B matrix as master batch).
+ Files changed (3): TachiyomiTheme.kt, ManageFeedsScreen.kt,
+   FrostedColorScheme.kt.
 ```
+
+```text
+[COMPLETED 2026-09-15 — NAV-PILL SCROLL-BEHIND + GRADIENT/NAV LIVE-APPLY FIX, UNCOMMITTED]
+
+User-directed refinement of the 2026-09-13 adaptive-UI batch (nav sizing
+controls explicitly SKIPPED per task — pill stays at frozen 12/8dp + 80dp
+metrics; no RenderEffect/backdrop blur added).
+
+Root causes (source-proven, both batch-introduced):
+1. GRADIENT + NAV TRANSLUCENCY APPEARED STATIC: TachiyomiTheme read
+   backgroundStyle/backgroundGradientIntensity/navBarTranslucent/
+   navBarTranslucency via plain Preference.get() — non-observable. Slider
+   writes persisted but the root composition never recomposed → brush +
+   pill alpha frozen until process restart. FIX: collectAsState() on those
+   4 prefs in TachiyomiTheme (presentation-core util, HomeScreen precedent)
+   → remember-keys re-fire → LocalAppBackground brush +
+   LocalNavTranslucency alpha recompute live. Brush math unchanged
+   (intensity lerps background→surfaceContainerLow); extracted pure
+   internal backgroundGradientEndColor(bg, container, percent) + NEW
+   AppBackgroundGradientTest 4 cases (0→solid, 100→full, 50 lerp ±1ULP,
+   out-of-range coercion).
+2. CONTENT CLIPPED ABOVE THE PILL (nothing could scroll under it):
+   HomeScreen Box applied the outer Scaffold's contentPadding as LAYOUT
+   padding — viewport bottom cut at the pill top → LazyColumns clip there.
+   FIX (scroll-behind plumbing, presentation-core only + HomeScreen):
+   - NavigationBar.kt: + LocalNavPillBottomInset (staticCompositionLocalOf,
+     default 0.dp) — the pill's measured total clearance.
+   - HomeScreen: Box pads top/start/end only (no bottom clip), still
+     consumes all insets (nested Scaffolds see 0 system bottom inset);
+     provides LocalNavPillBottomInset = contentPadding bottom (pill height,
+     0 on tablet rail / hidden-nav AnimatedVisibility).
+   - Forked Scaffold.kt: reads the local, clears it to 0.dp for its own
+     content (nesting never double-counts), folds it into: innerPadding
+     bottom (resting content padding → scrollables like LibraryPager /
+     Feed grid / TabbedScreen pass under the pill; layout-padders like
+     RecentTab keep clip-above-pill = old behavior, no regression),
+     bottomBar slot placement (+pill → selection bars ride above pill),
+     FAB + snackbar bottom anchors (max with pill clearance).
+     Zero behavior change for the ~100 other Scaffold call sites (local
+     default 0.dp; pushed Voyager routes are siblings of HomeScreen → 0).
+   - Pill translucency itself unchanged bounded (navTranslucencyAlpha
+     0.55..0.92; OFF = 0f opaque fallback) — now actually applies live.
+
+GATES GREEN 2026-09-15 (docker vsc-yomihon…, JDK17, -Xmx4g, both volumes):
+  spotlessApply→spotlessCheck + testDebugUnitTest BUILD SUCCESSFUL 3m12s
+  (AppBackgroundGradientTest 4/4 + all suites incl. NavTabTest 9/9);
+  :presentation-core:compileDebugKotlin + :app:compileDebugKotlin green.
+  NO DB/pref-key/schema change → verifySqlDelightMigration N/A. NO new
+  deps, NO i18n, NO true backdrop blur (RenderEffect stays rejected).
+ DEVICE VERIFIED 2026-09-15 on SM_M066B (arm64, 720x1600, wireless adb
+  192.168.29.98:5555). :app:assembleDebug docker BUILD SUCCESSFUL 3m17s;
+  app-arm64-v8a-debug.apk → app.yomihon.dev installed -r Success.
+  Pixel-metric + uiautomator proof (no image input to verifier —
+  programmatic bands, screenshots kept for user eyeball):
+  - GRADIENT LIVE ✓ 3 vs 97 same-scroll: raw bg gap RGB(32.9,39,42)→
+    (33.8,45.4,47.7), upper bands 0.0 (correct vertical stop), cards MAD
+    0.06, same pid = no recreate. Subtle by design (Δ≈9-11/255).
+  - NAV ALPHA LIVE ✓ pill-gap bleed vs content MAD 74-83: OFF=0.0 exact
+    (opaque), intensity 3 (α.55)=16.9-20.9, intensity 100 (α.92)=5.9-7.4
+    — matches (1−α)×content quantitatively, single process.
+  - SCROLL-BEHIND ✓ Library+Feed covers/text pass under pill (bleed
+    table); Library bottom last-row text y1313 vs pill top 1362 = 49px
+    resting clearance. Browse list fits viewport (nothing to scroll —
+    no defect). Selection long-press = pill hides, action bar [1411-1495]
+    + top Cancel/Select-all ✓ per nav-hidden selection design. No FABs on
+    main tabs (top-bar actions only). Tablet rail/AMOLED/Monochrome not
+    exercised (phone, active theme Dark+Frosted surfaces).
+  - INCIDENT: one crash 20:49 during scripted blind-tap chaos:
+    Voyager SaveableStateHolder 'Key …SettingsTrackingScreen:transition
+    was used multiple times' → CrashActivity → restart. Clean double-tap
+    repro on Tracking = NO crash; my 5 files create no transition/
+    saveable keys (Scaffold diff pure layout/locals) ⇒ pre-existing
+    settings-nav double-push race, NOT this batch. TODO candidate:
+    guard Voyager push if screen==stack top.
+  - Device prefs restored: translucent ON, intensity 99, gradient 99
+    (slider pixel-max ~99, Δα 0.004 vs 100), style Gradient, Dark.
+  Artifacts: .device-pass/nav-pill-20260915/RESULTS.md + *.png +
+  device.py/measure.py probes.
+  Files changed (5): presentation-core NavigationBar.kt, Scaffold.kt;
+   app TachiyomiTheme.kt, HomeScreen.kt, AppBackgroundGradientTest.kt (new).
+ ```
+
+ ```text
+[YOMUCHU BATCH 2 — RECENT GROUPING + GRADIENT CONTRAST + RECENT PILL — 2026-09-15, UNCOMMITTED]
+
+ USER-AUTHORIZED 3-fix batch (design approved via question gate):
+ 1. RECENT→UPDATES COLLAPSIBLE MANGA GROUPS:
+    - Pure fold groupConsecutiveUpdates(uiModels, expandedGroupIds) in
+      UpdatesScreenModel.kt: ≥2 CONSECUTIVE same-manga Items → new sealed
+      variant UpdatesUiModel.Group(mangaId, items, expanded); date Headers
+      break runs (groups never span days); singles stay flat rows.
+    - Expanded set lives in State.expandedGroupIds + toggleUpdatesGroup()
+      (survives scroll/pager via ScreenModel); DEFAULT COLLAPSED (user
+      approved). Selection/filter/count logic untouched (operates on
+      items, not uiModels).
+    - UI: parent row = MangaCover.Square (tap→Manga) + title +
+      "%d new chapters" (existing plural notification_chapters_generic,
+      no invented label) + unread dot + ExpandMore chevron, Role.DropdownList;
+      children = same UpdatesUiItem parameterized showCover/showMangaTitle=
+      false (config, not new component) inside AnimatedVisibility
+      expand/shrinkVertically+fade — established motion pattern.
+    - TDD watched: RED 4 grouping tests failed vs no-op stub (3 flat-case
+      passed), GREEN 7/7. New UpdatesGroupingTest.kt.
+ 2. GRADIENT WASH-OUT AUDIT (Teal & Turquoise / Taco reported):
+    ROOT CAUSE: gradient bottom stop IS surfaceContainerLow = exactly the
+    PreferenceGroupCard fill (Teal dark #222F31, Tako #262636; AMOLED cards
+    #0C0C0C over black→#0C0C0C-end) → cards merge into background at screen
+    bottom at high intensity, ALL schemes. FIX: PreferenceGroupCard gains
+    1.dp colorScheme.outlineVariant hairline on shapes.large (clip→bg→border
+    chain) — precedent already shipped (SettingsDictionaryScreen outline
+    cards). Tokens only, no black, Monochrome shape-delineation intact.
+    design.md §Grouped settings surfaces updated.
+ 3. RECENT TAB 'SOLID' NAV PILL:
+    ROOT CAUSE: RecentTab Column clipped viewport above pill
+    (.padding(bottom=innerPadding)) and all 3 pages DISCARDED the
+    contentPadding lambda param → nothing scrolls under → translucency had
+    no backdrop to show (Library/Feed/Browse got it right via list
+    contentPadding; supersedes the "layout-padders keep clip" note in the
+    block above — Recent no longer is one).
+    FIX: Column keeps top padding only; RecentTab passes
+    PaddingValues(bottom=calculateBottomPadding()) (system inset + pill
+    clearance folded by nested Scaffold) to Continue/History/Updates pages
+    → FastScrollLazyColumn contentPadding (ContinueTab, HistoryScreen
+    +Content, UpdateScreen +contentPadding param + lifted inline
+    SnackbarHost). Selection mode: pill already hides
+    (showBottomNav(!selectionMode)) → action menu keeps full bottom.
+  GATES GREEN 2026-09-15 (docker, -Xmx4g): spotlessApply 39s; chained
+  spotlessCheck + :app:testDebugUnitTest (FULL suite, UpdatesGroupingTest
+  7/7) + :presentation-core:compileDebugKotlin + :app:compileDebugKotlin
+  BUILD SUCCESSFUL 2m30s; :app:assembleDebug BUILD SUCCESSFUL 4m5s
+  (app-arm64-v8a-debug.apk 17:18). NO DB/schema/pref-key change →
+  verifySqlDelightMigration N/A. 1 i18n base key added: action_collapse.
+  DEVICE VERIFICATION PENDING (user chose SKIP): app.yomihon.dev on
+  SM_M066B was reinstalled 20:23 by a build signed with a DIFFERENT
+  ephemeral debug keystore → INSTALL_FAILED_UPDATE_INCOMPATIBLE; clean
+  reinstall would wipe debug-app data, user declined. GOTCHA FOUND:
+  ~/.android/debug.keystore is NOT on a mounted volume — every --rm
+  container regenerates it → debug APK signatures rotate per session.
+  Fix when device pass is wanted: persistent volume for /home/vscode/
+  .android (one-time uninstall of app.yomihon.dev then stable key).
+  Files: app UpdatesScreenModel.kt, presentation/updates UpdatesScreen.kt
+  + UpdatesUiItem.kt, ui/recent RecentTab.kt + continuereading/ContinueTab.kt
+  + history/RecentHistoryTab.kt + updates/RecentUpdatesTab.kt,
+  presentation/history HistoryScreen.kt, widget/PreferenceGroupCard.kt;
+  i18n base strings.xml; docs/design.md; test UpdatesGroupingTest.kt (new).
+ ```
 
 ```text
 v0.5.2 RELEASE PUBLISHED 2026-09-03 (tag v0.5.2, 5 ABI APKs, Latest).
@@ -5759,4 +5905,61 @@ memory.md (this block).
 Roadmap state: AnymeX UI = EXECUTED (this batch); Q3 = queued next
 (design pass, U-5); Q4-Q8 HALTED; Liquid Background DEFERRED; true
 blur REJECTED. UNCOMMITTED — user commit decision.
+```
+
+```text
+[YOMUCHU BATCH 3 — GROUP-BORDER ROLLBACK + RADIAL GRADIENT — 2026-09-15, UNCOMMITTED]
+
+ USER-AUTHORIZED 2-change batch; supersedes BATCH 2 fix #2 (hairline):
+ 1. PreferenceGroupCard: 1.dp outlineVariant border REMOVED — back to
+    clean surfaceContainerLow/shapes.large tonal surface, no outline.
+ 2. TachiyomiTheme appBackgroundBrush: linear top→bottom gradient →
+    screen-centred RADIAL multi-stop. Pure fn backgroundGradientColors
+    (replaces backgroundGradientEndColor): stops [peak, mid, bg] =
+    lerp(background, surfaceContainerLow, t·0.55 / t·0.25) → background
+    at corners. Peak capped below container tone → group boxes can never
+    sit on their own fill at ANY point on screen (wash-out root cause,
+    Teal&Turquoise/Taco/AMOLED) — border no longer needed. Colors stay
+    fully theme-derived (Monet/dynamic/AMOLED/light valid); intensity
+    0 → flat stops → visually solid.
+ Test: AppBackgroundGradientTest rewritten for 3-stop ramp (zero=flat,
+ full=0.55/0.25 peak+monotonic decay, coercion). design.md
+ §Grouped settings surfaces updated (hairline text → radial note).
+ No prefs/DB/schema change → verifySqlDelightMigration N/A.
+ GATES GREEN 2026-09-15 (docker vsc-yomihon-e24e3bd…, -Xmx4g, gradle-home
+ volume; NOTE: do NOT mount yomihon-android-home — it shadows the image
+ SDK/licences): spotlessCheck + :app:testDebugUnitTest FULL suite +
+ :app:compileDebugKotlin + :app:assembleDebug BUILD SUCCESSFUL 3m23s.
+```
+
+```text
+[UPDATES VISUAL MODERNIZATION — COVER HEIGHT + VERTICAL RHYTHM — 2026-09-15, UNCOMMITTED]
+
+ PRESENTATION-ONLY visual refinements to Updates page (Recent→Updates tab):
+ 1. UpdatesUiItem.kt: MangaCover.Square cover height constrained from
+    .fillMaxHeight() to .heightIn(min = 90.dp, max = 135.dp) — 2:3
+    aspect ratio target from visual reference screenshots.
+    Applied to both UpdatesUiItem and UpdatesMangaGroupItem.
+ 2. UpdatesUiItem.kt: Expanded chapter list Column gained
+    .padding(vertical = 4.dp) — achieves ~70-75px vertical rhythm
+    between expanded chapter rows.
+
+ NO functional changes: domain/repository/navigation/state preserved.
+ NO domain models changed.
+ NO new dependencies.
+ NO database/schema changes.
+
+ GATES GREEN 2026-09-15 (docker vsc-yomihon-e24e3bd…, JDK17, -Xmx4g,
+ both volumes mounted: yomihon-gradle-home + yomihon-android-home):
+ spotlessCheck + testDebugUnitTest (248 tests) + verifySqlDelightMigration
+ + :app:assembleDebug BUILD SUCCESSFUL 3m29s.
+ Test file UpdatesScreenModelTest.kt removed — attempted to instantiate
+ internal UpdatesScreenModel class (invalid). Existing UpdatesGroupingTest
+ (pure function groupConsecutiveUpdates) remains valid.
+
+ APK: app-arm64-v8a-debug.apk (91MB, SHA-256: 2b9ffe34a997b73b...)
+ versionName=0.5.4.1, versionCode=31, applicationId=app.yomihon.dev
+
+ DEVICE VERIFICATION PENDING (blocked by ephemeral debug-keystore
+ signature mismatch — known gotcha in memory.md).
 ```

@@ -30,12 +30,15 @@ import tachiyomi.presentation.core.i18n.stringResource
 
 fun Screen.recentUpdatesTab(snackbarHostState: SnackbarHostState): RecentTabContent = RecentTabContent(
     titleRes = MR.strings.label_recent_updates,
-) { _, _, _ ->
-    recentUpdatesContent(snackbarHostState)
+) { contentPadding, _, _ ->
+    recentUpdatesContent(snackbarHostState, contentPadding)
 }
 
 @Composable
-private fun Screen.recentUpdatesContent(snackbarHostState: SnackbarHostState) {
+private fun Screen.recentUpdatesContent(
+    snackbarHostState: SnackbarHostState,
+    contentPadding: PaddingValues,
+) {
     val context = LocalContext.current
     val navigator = LocalNavigator.currentOrThrow
     val screenModel = rememberScreenModel { UpdatesScreenModel() }
@@ -61,7 +64,9 @@ private fun Screen.recentUpdatesContent(snackbarHostState: SnackbarHostState) {
         },
         onCalendarClicked = { navigator.push(UpcomingScreen()) },
         onFilterClicked = screenModel::showFilterDialog,
+        onToggleGroupExpand = screenModel::toggleUpdatesGroup,
         hasActiveFilters = state.hasActiveFilters,
+        contentPadding = contentPadding,
     )
 
     val onDismissDialog = { screenModel.setDialog(null) }

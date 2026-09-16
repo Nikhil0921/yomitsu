@@ -5,8 +5,17 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **ADAPTIVE UI & PERSONALIZATION BATCH EXECUTED
-  2026-09-13 (user-authorized master prompt; supersedes nav-reorder/
+Current phase pointer: **YOMUCHU UI BATCH 2 EXECUTED 2026-09-15
+  (user-authorized, design-approved): Recent→Updates collapsible per-manga
+  grouping (pure fold fn + Group uiModel + TDD 7/7, default collapsed);
+  PreferenceGroupCard outlineVariant hairline (gradient-stop wash-out fix,
+  all themes); RecentTab un-clipped so all 3 pages scroll under the floating
+  pill (contentPadding threading). Gates green (spotlessCheck + full
+  testDebugUnitTest + compiles 2m30s; assembleDebug 4m5s). UNCOMMITTED.
+  DEVICE VERIFICATION PENDING user (blocked by ephemeral debug-keystore
+  signature mismatch — see memory.md gotcha; prior 2026-09-15 morning
+  gradient/live-alpha batch WAS device-verified).**
+  Prior: ADAPTIVE UI & PERSONALIZATION BATCH EXECUTED 2026-09-13 (user-authorized master prompt; supersedes nav-reorder/
   background locks for this scope): immersive mode, bottom-nav drag
   reorder (NavTab identity model + 9 tests), Feed drag reorder,
   translucent nav pill + intensity, theme-derived background gradient +

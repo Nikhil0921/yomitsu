@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
@@ -124,6 +126,9 @@ fun Scaffold(
     // app-background brush instead of a flat color.
     val appBackground = LocalAppBackground.current
     val backgroundDrawn = appBackground != null
+    // Yomitsu: floating nav pill clearance injected by the host; folded into
+    // this Scaffold's content padding and bottom-anchored slots below.
+    val navPillBottomInset = LocalNavPillBottomInset.current
     androidx.compose.material3.Surface(
         modifier = Modifier
             .then(
@@ -145,16 +150,21 @@ fun Scaffold(
         color = if (backgroundDrawn) Color.Transparent else containerColor,
         contentColor = contentColor,
     ) {
-        ScaffoldLayout(
-            fabPosition = floatingActionButtonPosition,
-            topBar = { topBar(topBarScrollBehavior) },
-            startBar = startBar,
-            bottomBar = bottomBar,
-            content = content,
-            snackbar = snackbarHost,
-            contentWindowInsets = remainingWindowInsets,
-            fab = floatingActionButton,
-        )
+        // The pill inset is consumed by THIS Scaffold's slots; descendants
+        // start at 0 so nested Scaffolds never double-count it.
+        CompositionLocalProvider(LocalNavPillBottomInset provides 0.dp) {
+            ScaffoldLayout(
+                fabPosition = floatingActionButtonPosition,
+                topBar = { topBar(topBarScrollBehavior) },
+                startBar = startBar,
+                bottomBar = bottomBar,
+                content = content,
+                snackbar = snackbarHost,
+                contentWindowInsets = remainingWindowInsets,
+                fab = floatingActionButton,
+                navPillBottomInset = navPillBottomInset,
+            )
+        }
     }
 }
 
@@ -181,10 +191,16 @@ private fun ScaffoldLayout(
     fab: @Composable () -> Unit,
     contentWindowInsets: WindowInsets,
     bottomBar: @Composable () -> Unit,
+    navPillBottomInset: Dp,
 ) {
     SubcomposeLayout { constraints ->
         val layoutWidth = constraints.maxWidth
         val layoutHeight = constraints.maxHeight
+
+        // Yomitsu: floating nav pill clearance — bottom-anchored slots ride
+        // above the pill and content gets it as resting clearance instead of
+        // a viewport cut, so scrollables can pass under the translucent pill.
+        val pillInsetPx = navPillBottomInset.roundToPx()
 
         val looseConstraints = constraints.copy(minWidth = 0, minHeight = 0)
 
@@ -265,12 +281,15 @@ private fun ScaffoldLayout(
                 .fastMaxBy { it.height }
                 ?.height
                 ?.takeIf { it != 0 }
+            // Yomitsu: pill clearance raises the bottom anchor even when this
+            // Scaffold has no bottom bar of its own.
+            val bottomAnchor = max(max(bottomBarHeight ?: 0, bottomInset), pillInsetPx)
             val fabOffsetFromBottom = fabPlacement?.let {
-                max(bottomBarHeight ?: 0, bottomInset) + it.height + FabSpacing.roundToPx()
+                bottomAnchor + it.height + FabSpacing.roundToPx()
             }
 
             val snackbarOffsetFromBottom = if (snackbarHeight != 0) {
-                snackbarHeight + (fabOffsetFromBottom ?: max(bottomBarHeight ?: 0, bottomInset))
+                snackbarHeight + (fabOffsetFromBottom ?: bottomAnchor)
             } else {
                 0
             }
@@ -286,10 +305,12 @@ private fun ScaffoldLayout(
                         topBarHeight.toDp()
                     },
                     // Tachiyomi: Also take account of fab height when providing inner padding
+                    // Yomitsu: + pill clearance as resting content padding (the content
+                    // viewport itself stays full-height, so scrollables pass under the pill)
                     bottom = if (bottomBarPlaceables.isEmpty() || bottomBarHeightPx == 0) {
-                        max(insets.calculateBottomPadding(), fabOffsetDp)
+                        max(insets.calculateBottomPadding() + navPillBottomInset, fabOffsetDp)
                     } else {
-                        max(bottomBarHeightPx.toDp(), fabOffsetDp)
+                        max((bottomBarHeightPx + pillInsetPx).toDp(), fabOffsetDp)
                     },
                     start = max(
                         insets.calculateStartPadding((this@SubcomposeLayout).layoutDirection),
@@ -318,8 +339,9 @@ private fun ScaffoldLayout(
                 )
             }
             // The bottom bar is always at the bottom of the layout
+            // Yomitsu: raised by the floating nav pill clearance above it.
             bottomBarPlaceables.fastForEach {
-                it.place(0, layoutHeight - (bottomBarHeight ?: 0))
+                it.place(0, layoutHeight - (bottomBarHeight ?: 0) - pillInsetPx)
             }
             // Explicitly not using placeRelative here as `leftOffset` already accounts for RTL
             fabPlaceables.fastForEach {

@@ -31,12 +31,15 @@ import tachiyomi.presentation.core.i18n.stringResource
 
 fun Screen.recentHistoryTab(snackbarHostState: SnackbarHostState): RecentTabContent = RecentTabContent(
     titleRes = MR.strings.history,
-) { _, _, _ ->
-    recentHistoryContent(snackbarHostState)
+) { contentPadding, _, _ ->
+    recentHistoryContent(snackbarHostState, contentPadding)
 }
 
 @Composable
-private fun Screen.recentHistoryContent(snackbarHostState: SnackbarHostState) {
+private fun Screen.recentHistoryContent(
+    snackbarHostState: SnackbarHostState,
+    contentPadding: PaddingValues,
+) {
     val navigator = LocalNavigator.currentOrThrow
     val context = LocalContext.current
     val screenModel = rememberScreenModel { HistoryScreenModel() }
@@ -45,6 +48,7 @@ private fun Screen.recentHistoryContent(snackbarHostState: SnackbarHostState) {
     HistoryScreen(
         state = state,
         snackbarHostState = snackbarHostState,
+        contentPadding = contentPadding,
         onSearchQueryChange = screenModel::updateSearchQuery,
         onClickCover = { navigator.push(MangaScreen(it)) },
         onClickResume = screenModel::getNextChapterForManga,
