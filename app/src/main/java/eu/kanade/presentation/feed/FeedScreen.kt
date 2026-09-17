@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -43,10 +46,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -72,6 +77,7 @@ import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.tachiyomi.ui.browse.source.browse.isGenreSelected
 import eu.kanade.tachiyomi.ui.feed.FeedScreenModel
 import eu.kanade.tachiyomi.ui.feed.FeedSectionResult
+import kotlinx.coroutines.flow.distinctUntilChanged
 import tachiyomi.domain.manga.model.asMangaCover
 import tachiyomi.domain.source.model.Source
 import tachiyomi.i18n.MR
@@ -85,13 +91,15 @@ import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.theme.header
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
+private const val AUTO_LOAD_THRESHOLD = 5
+
 @Composable
 fun FeedScreen(
     state: FeedScreenModel.State,
     onMangaClick: (Long) -> Unit,
     onAddFeedClick: () -> Unit,
     onManageFeedsClick: () -> Unit,
-    onAddFeedConfirm: (Long, FeedListing) -> Unit,
+    onAddFeedConfirm: (Long, List<FeedListing>) -> Unit,
     onSelectSource: (Long?) -> Unit,
     onSelectListing: (FeedListing?) -> Unit,
     onToggleGenre: (SourceModelFilter<*>) -> Unit,
@@ -108,6 +116,27 @@ fun FeedScreen(
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     var showCustomizeDialog by remember { mutableStateOf(false) }
+    val gridState = rememberLazyGridState()
+
+    LaunchedEffect(gridState) {
+        snapshotFlow {
+            val layout = gridState.layoutInfo
+            val lastVisible = layout.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItems = layout.totalItemsCount
+            lastVisible >= totalItems - AUTO_LOAD_THRESHOLD
+        }
+            .distinctUntilChanged()
+            .collect { nearEnd ->
+                if (nearEnd && state.selectedSourceId != null) {
+                    val lastFeed = state.visibleFeeds.lastOrNull() ?: return@collect
+                    val section = state.sections[lastFeed] as? FeedSectionResult.Success
+                        ?: return@collect
+                    if (!section.isLoadingMore && section.hasMore) {
+                        onLoadMore(lastFeed)
+                    }
+                }
+            }
+    }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -163,6 +192,7 @@ fun FeedScreen(
         // containers, no custom collapse framework).
         val bottom = padding.calculateBottomPadding()
         LazyVerticalGrid(
+            state = gridState,
             columns = if (gridColumns > 0) GridCells.Fixed(gridColumns) else GridCells.Adaptive(96.dp),
             modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottom),
@@ -178,6 +208,21 @@ fun FeedScreen(
                 )
             }
             state.visibleFeeds.forEach { feed ->
+                if (state.selectedSourceId == null) {
+                    val sourceName = state.sources.firstOrNull { it.id == feed.sourceId }?.visualName
+                    if (sourceName != null) {
+                        item(
+                            span = { GridItemSpan(maxLineSpan) },
+                            contentType = { "feed_source_header" },
+                        ) {
+                            Text(
+                                text = sourceName,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
                 when (val section = state.sections[feed]) {
                     is FeedSectionResult.Success -> {
                         items(section.mangas, key = { "${feed.sourceId}-${feed.listing}-${it.url}" }) { manga ->
@@ -267,80 +312,102 @@ fun FeedScreen(
 @Composable
 private fun AddFeedDialog(
     sources: List<Source>,
-    onConfirm: (Long, FeedListing) -> Unit,
+    onConfirm: (Long, List<FeedListing>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var selectedSource by remember { mutableStateOf<Source?>(null) }
-    var selectedListing by remember { mutableStateOf(FeedListing.LATEST) }
+    var selectedListings by remember { mutableStateOf(setOf(FeedListing.LATEST)) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(MR.strings.feed_add)) },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text(stringResource(MR.strings.feed_select_source), style = MaterialTheme.typography.header)
-                sources.forEach { source ->
-                    val selected = selectedSource?.id == source.id
-                    ListItem(
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        headlineContent = { Text(source.visualName) },
-                        supportingContent = { Text(source.lang) },
-                        trailingContent = {
-                            RadioButton(
-                                selected = selected,
-                                onClick = null,
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = selected,
-                                role = Role.RadioButton,
-                                onClick = {
-                                    selectedSource = source
-                                    if (!source.supportsLatest) selectedListing = FeedListing.POPULAR
-                                },
-                            ),
-                    )
-                }
-                HorizontalDivider(modifier = Modifier.padding(vertical = MaterialTheme.padding.small))
-                Text(stringResource(MR.strings.feed_select_listing), style = MaterialTheme.typography.header)
-                Row(horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small)) {
-                    FilterChip(
-                        selected = selectedListing == FeedListing.POPULAR,
-                        onClick = { selectedListing = FeedListing.POPULAR },
-                        label = { Text(stringResource(MR.strings.popular)) },
-                    )
-                    val latestSupported = selectedSource?.supportsLatest ?: true
-                    FilterChip(
-                        selected = selectedListing == FeedListing.LATEST,
-                        onClick = { if (latestSupported) selectedListing = FeedListing.LATEST },
-                        enabled = latestSupported,
-                        label = { Text(stringResource(MR.strings.latest)) },
-                    )
-                }
+    AdaptiveSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(MaterialTheme.padding.medium),
+        ) {
+            Text(
+                stringResource(MR.strings.feed_add),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Spacer(Modifier.height(MaterialTheme.padding.small))
+            Text(stringResource(MR.strings.feed_select_source), style = MaterialTheme.typography.header)
+            sources.forEach { source ->
+                val selected = selectedSource?.id == source.id
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = { Text(source.visualName) },
+                    trailingContent = {
+                        RadioButton(
+                            selected = selected,
+                            onClick = null,
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = selected,
+                            role = Role.RadioButton,
+                            onClick = {
+                                selectedSource = source
+                                if (!source.supportsLatest) {
+                                    selectedListings = setOf(FeedListing.POPULAR)
+                                } else {
+                                    selectedListings = setOf(FeedListing.LATEST)
+                                }
+                            },
+                        ),
+                )
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    selectedSource?.let {
-                        // POPULAR is supported by every source; never confirm an
-                        // unsupported Latest selection.
-                        onConfirm(it.id, if (it.supportsLatest) selectedListing else FeedListing.POPULAR)
-                    }
-                },
-                enabled = selectedSource != null,
+            HorizontalDivider(modifier = Modifier.padding(vertical = MaterialTheme.padding.small))
+            Text(stringResource(MR.strings.feed_select_listing), style = MaterialTheme.typography.header)
+            val latestSupported = selectedSource?.supportsLatest ?: true
+            Row(horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small)) {
+                FilterChip(
+                    selected = FeedListing.POPULAR in selectedListings,
+                    onClick = {
+                        selectedListings = if (FeedListing.POPULAR in selectedListings) {
+                            selectedListings - FeedListing.POPULAR
+                        } else {
+                            selectedListings + FeedListing.POPULAR
+                        }
+                    },
+                    label = { Text(stringResource(MR.strings.popular)) },
+                )
+                FilterChip(
+                    selected = FeedListing.LATEST in selectedListings,
+                    onClick = {
+                        if (latestSupported) {
+                            selectedListings = if (FeedListing.LATEST in selectedListings) {
+                                selectedListings - FeedListing.LATEST
+                            } else {
+                                selectedListings + FeedListing.LATEST
+                            }
+                        }
+                    },
+                    enabled = latestSupported,
+                    label = { Text(stringResource(MR.strings.latest)) },
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
             ) {
-                Text(stringResource(MR.strings.action_ok))
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+                TextButton(
+                    onClick = {
+                        selectedSource?.let { source ->
+                            onConfirm(source.id, selectedListings.toList())
+                        }
+                    },
+                    enabled = selectedSource != null && selectedListings.isNotEmpty(),
+                ) {
+                    Text(stringResource(MR.strings.action_ok))
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(MR.strings.action_cancel))
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable

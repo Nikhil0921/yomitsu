@@ -56,7 +56,7 @@ data object FeedTab : Tab {
             onMangaClick = { mangaId -> navigator.push(MangaScreen(mangaId, true)) },
             onAddFeedClick = { screenModel.showAddDialog() },
             onManageFeedsClick = { navigator.push(ManageFeedsScreen()) },
-            onAddFeedConfirm = { sourceId, listing -> screenModel.addFeed(sourceId, listing) },
+            onAddFeedConfirm = { sourceId, listings -> listings.forEach { screenModel.addFeed(sourceId, it) } },
             onSelectSource = { screenModel.selectSource(it) },
             onSelectListing = { screenModel.selectListing(it) },
             onToggleGenre = { screenModel.toggleGenreChip(it) },

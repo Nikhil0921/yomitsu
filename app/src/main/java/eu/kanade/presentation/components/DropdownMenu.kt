@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.theme.LocalPopupTranslucency
+import tachiyomi.presentation.core.theme.asChromeContainer
 import androidx.compose.material3.DropdownMenu as ComposeDropdownMenu
 
 /**
@@ -39,6 +41,12 @@ fun DropdownMenu(
     properties: PopupProperties = PopupProperties(focusable = true),
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val popupAlpha = LocalPopupTranslucency.current
+    val containerColor = if (popupAlpha > 0f) {
+        MaterialTheme.colorScheme.surfaceContainerHigh.asChromeContainer()
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
     ComposeDropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
@@ -46,6 +54,7 @@ fun DropdownMenu(
         offset = offset,
         scrollState = scrollState,
         properties = properties,
+        containerColor = containerColor,
         content = content,
     )
 }

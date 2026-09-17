@@ -8,8 +8,17 @@ Yomihon — Android manga reader (Kotlin, Jetpack Compose, Gradle multi-module).
 
 ## Session protocol — read this first
 
-- `docs/memory.md` is the living state file: **read it before any substantial work, update it after** (protocol at its bottom). It records phase status, verified builds, known issues, and decisions — don't redo repo analysis from scratch.
-- `docs/rules.md` is the engineering rulebook (layering, error handling, AI hard limits). `docs/phase.md` holds the current phase pointer — never mix phases in one change set.
+Startup sequence (default — never bulk-load the docs tree):
+
+1. `docs/state.md` — compact current state: version/HEAD, tree, authorized task, blockers, gotchas, scope locks.
+2. `docs/rules.md` — engineering rulebook + documentation/state-management protocol (§12).
+3. `docs/memory.md` — compressed active memory: recent sessions + durable decisions/gotchas.
+4. `docs/implementation-roadmap.md` — CANONICAL execution authority: execute only the current authorized task.
+
+Read other docs only when the task requires them: UI → `design.md` / `ui-implementation-map.md`; phase history → `phase.md`; historical evidence → `docs/history/session-logs.md` (append-only archive; NEVER read at normal startup); architecture → `architecture.md`.
+
+After meaningful work: update `state.md` (current state) + `memory.md` (recent delta + durable knowledge) + `history/session-logs.md` (detailed record). Roadmap/phase only on genuine state change. Never duplicate full session history across files.
+
 - Root `AGENTS.md`, `architect.md`, `architect-2.md` belong to the user — don't delete or rewrite them.
 
 ## Commands

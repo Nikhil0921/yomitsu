@@ -32,7 +32,9 @@ import eu.kanade.presentation.theme.colorscheme.YinYangColorScheme
 import eu.kanade.presentation.theme.colorscheme.YotsubaColorScheme
 import tachiyomi.presentation.core.theme.LocalAppBackground
 import tachiyomi.presentation.core.theme.LocalNavTranslucency
+import tachiyomi.presentation.core.theme.LocalPopupTranslucency
 import tachiyomi.presentation.core.theme.LocalTranslucentSurfaces
+import tachiyomi.presentation.core.theme.modalTranslucencyAlpha
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -50,6 +52,7 @@ fun TachiyomiTheme(
     // recreate (plain .get() here froze them until process restart).
     val navTranslucent by uiPreferences.navBarTranslucent.collectAsState()
     val navIntensity by uiPreferences.navBarTranslucency.collectAsState()
+    val popupSheetTranslucent by uiPreferences.popupSheetTranslucent.collectAsState()
     val backgroundStyle by uiPreferences.backgroundStyle.collectAsState()
     val gradientIntensity by uiPreferences.backgroundGradientIntensity.collectAsState()
     BaseTachiyomiTheme(
@@ -61,6 +64,12 @@ fun TachiyomiTheme(
         // OFF = opaque (0f bypasses asNavContainer); ON = bounded 0.55..0.92 alpha.
         navTranslucencyAlpha = if (navTranslucent) {
             tachiyomi.presentation.core.theme.navTranslucencyAlpha(navIntensity)
+        } else {
+            0f
+        },
+        // OFF = opaque modal; ON = user-controlled modal frost intensity.
+        popupTranslucencyAlpha = if (popupSheetTranslucent) {
+            modalTranslucencyAlpha(navIntensity)
         } else {
             0f
         },
@@ -80,6 +89,7 @@ fun TachiyomiPreviewTheme(
     backgroundStyle = BackgroundStyle.SOLID,
     gradientIntensity = 0,
     navTranslucencyAlpha = 0f,
+    popupTranslucencyAlpha = 0f,
     content = content,
 )
 
@@ -91,6 +101,7 @@ private fun BaseTachiyomiTheme(
     backgroundStyle: BackgroundStyle = BackgroundStyle.SOLID,
     gradientIntensity: Int = 0,
     navTranslucencyAlpha: Float = 0f,
+    popupTranslucencyAlpha: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -98,6 +109,7 @@ private fun BaseTachiyomiTheme(
     androidx.compose.runtime.CompositionLocalProvider(
         LocalTranslucentSurfaces provides isTranslucent,
         LocalNavTranslucency provides navTranslucencyAlpha,
+        LocalPopupTranslucency provides popupTranslucencyAlpha,
         LocalAppBackground provides remember(appTheme, isDark, isAmoled, backgroundStyle, gradientIntensity) {
             appBackgroundBrush(
                 context = context,

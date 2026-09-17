@@ -40,6 +40,8 @@ class UiPreferences(
 
     val navBarTranslucency: Preference<Int> = preferenceStore.getInt("pref_nav_bar_translucency", 60)
 
+    val popupSheetTranslucent: Preference<Boolean> = preferenceStore.getBoolean("pref_popup_sheet_translucent", false)
+
     val backgroundStyle: Preference<BackgroundStyle> = preferenceStore.getEnum(
         "pref_background_style",
         BackgroundStyle.SOLID,

@@ -11,7 +11,6 @@ import androidx.core.app.ActivityCompat
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.ui.UiPreferences
-import eu.kanade.domain.ui.model.BackgroundStyle
 import eu.kanade.domain.ui.model.TabletUiMode
 import eu.kanade.domain.ui.model.ThemeMode
 import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
@@ -40,7 +39,9 @@ object SettingsAppearanceScreen : SearchableSettings {
         return listOf(
             getThemeGroup(uiPreferences = uiPreferences),
             getNavigationGroup(uiPreferences = uiPreferences),
-            getBackgroundGroup(uiPreferences = uiPreferences),
+            // DEFERRED FEATURE: Background/gradient controls hidden from UI.
+            // Infrastructure retained in TachiyomiTheme for possible future
+            // reactivation after a stronger, device-verified implementation.
             getDisplayGroup(uiPreferences = uiPreferences),
         )
     }
@@ -54,6 +55,11 @@ object SettingsAppearanceScreen : SearchableSettings {
         val navTranslucent by navTranslucentPref.collectAsState()
         val navIntensityPref = uiPreferences.navBarTranslucency
         val navIntensity by navIntensityPref.collectAsState()
+
+        // DEFERRED FEATURE: Popup/sheet translucency toggle intentionally
+        // hidden from UI. Infrastructure in TachiyomiTheme + Translucent.kt
+        // retained for possible future reactivation after a stronger,
+        // device-verified implementation.
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_navigation),
@@ -86,39 +92,6 @@ object SettingsAppearanceScreen : SearchableSettings {
                             title = stringResource(MR.strings.pref_nav_bar_translucency),
                             valueRange = 0..100,
                             onValueChanged = { navIntensityPref.set(it) },
-                        ),
-                    )
-                }
-            },
-        )
-    }
-
-    @Composable
-    private fun getBackgroundGroup(
-        uiPreferences: UiPreferences,
-    ): Preference.PreferenceGroup {
-        val backgroundPref = uiPreferences.backgroundStyle
-        val background by backgroundPref.collectAsState()
-        val gradientIntensityPref = uiPreferences.backgroundGradientIntensity
-        val gradientIntensity by gradientIntensityPref.collectAsState()
-
-        return Preference.PreferenceGroup(
-            title = stringResource(MR.strings.pref_category_background),
-            preferenceItems = buildList {
-                add(
-                    Preference.PreferenceItem.ListPreference(
-                        preference = backgroundPref,
-                        entries = BackgroundStyle.entries.associateWith { stringResource(it.titleRes) },
-                        title = stringResource(MR.strings.pref_category_background),
-                    ),
-                )
-                if (background == BackgroundStyle.GRADIENT) {
-                    add(
-                        Preference.PreferenceItem.SliderPreference(
-                            value = gradientIntensity,
-                            title = stringResource(MR.strings.pref_background_gradient_intensity),
-                            valueRange = 0..100,
-                            onValueChanged = { gradientIntensityPref.set(it) },
                         ),
                     )
                 }

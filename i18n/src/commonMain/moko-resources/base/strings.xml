@@ -255,6 +255,8 @@
     <string name="pref_navigation_tabs_summary">Reorder the bottom navigation tabs</string>
     <string name="pref_nav_bar_translucent">Translucent navigation bar</string>
     <string name="pref_nav_bar_translucent_summary">Let content show through the navigation pill</string>
+    <string name="pref_popup_sheet_translucent">Translucent pop-ups &amp; sheets</string>
+    <string name="pref_popup_sheet_translucent_summary">Apply a subtle frosted surface treatment to content popups and sheets</string>
     <string name="pref_nav_bar_translucency">Translucency intensity</string>
     <string name="pref_category_background">Background</string>
     <string name="background_style_solid">Solid</string>

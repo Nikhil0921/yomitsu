@@ -5,7 +5,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +22,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,12 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
@@ -61,7 +60,6 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.ListGroupHeader
 import tachiyomi.presentation.core.components.material.DISABLED_ALPHA
 import tachiyomi.presentation.core.components.material.padding
-import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.selectedBackground
 
@@ -118,26 +116,14 @@ internal fun LazyListScope.updatesUiItems(
             }
             is UpdatesUiModel.Item -> {
                 val updatesItem = item.item
-                UpdatesUiItem(
+                UpdatesSingleChapterCard(
                     modifier = Modifier.animateItemFastScroll(),
-                    update = updatesItem.update,
-                    selected = updatesItem.selected,
-                    readProgress = updatesItem.readProgressLabel(),
-                    onLongClick = {
-                        onUpdateSelected(updatesItem, !updatesItem.selected, true)
-                    },
-                    onClick = {
-                        when {
-                            selectionMode -> onUpdateSelected(updatesItem, !updatesItem.selected, false)
-                            else -> onClickUpdate(updatesItem)
-                        }
-                    },
-                    onClickCover = { onClickCover(updatesItem) }.takeIf { !selectionMode },
-                    onDownloadChapter = { action: ChapterDownloadAction ->
-                        onDownloadChapter(listOf(updatesItem), action)
-                    }.takeIf { !selectionMode },
-                    downloadStateProvider = updatesItem.downloadStateProvider,
-                    downloadProgressProvider = updatesItem.downloadProgressProvider,
+                    updatesItem = updatesItem,
+                    selectionMode = selectionMode,
+                    onUpdateSelected = onUpdateSelected,
+                    onClickCover = onClickCover,
+                    onClickUpdate = onClickUpdate,
+                    onDownloadChapter = onDownloadChapter,
                 )
             }
             is UpdatesUiModel.Group -> {
@@ -165,9 +151,9 @@ private fun UpdatesItem.readProgressLabel(): String? {
 }
 
 /**
- * Collapsible per-manga group card: one cover + title + chapter count as the
- * parent row, chapter rows (cover-less, title-less, so the manga identity is
- * not repeated) revealed under a rotating chevron.
+ * Compact per-manga group card: one small cover, title, latest update, and a
+ * trailing expand control. Chapter rows stay cover-less/title-less inside the
+ * same card.
  */
 @Composable
 private fun UpdatesMangaGroupItem(
@@ -181,74 +167,36 @@ private fun UpdatesMangaGroupItem(
     modifier: Modifier = Modifier,
 ) {
     val first = group.items.first()
-    Column(modifier = modifier) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onToggleExpand(group.mangaId) }
-                .semantics { role = Role.DropdownList }
-                .heightIn(min = 68.dp)
-                .padding(horizontal = MaterialTheme.padding.medium),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MangaCover.Square(
-                modifier = Modifier
-                    .padding(vertical = 6.dp)
-                    .heightIn(min = 90.dp, max = 135.dp),
-                data = first.update.coverData,
-                contentDescription = first.update.mangaTitle,
-                onClick = { onClickCover(first) }.takeIf { !selectionMode },
-            )
-            Column(
-                modifier = Modifier
-                    .padding(horizontal = MaterialTheme.padding.medium)
-                    .weight(1f),
-            ) {
-                Text(
-                    text = first.update.mangaTitle,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodyMedium,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (group.items.fastAny { !it.update.read }) {
-                        Icon(
-                            imageVector = Icons.Filled.Circle,
-                            contentDescription = stringResource(MR.strings.unread),
-                            modifier = Modifier
-                                .height(8.dp)
-                                .padding(end = 4.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Text(
-                        text = pluralStringResource(
-                            MR.plurals.notification_chapters_generic,
-                            count = group.items.size,
-                            group.items.size,
+    Card(
+        modifier = modifier.padding(
+            horizontal = MaterialTheme.padding.medium,
+            vertical = MaterialTheme.padding.small,
+        ),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        UpdatesCompactCardHeader(
+            update = first.update,
+            hasUnread = group.items.fastAny { !it.update.read },
+            readProgress = null,
+            onClickCover = { onClickCover(first) }.takeIf { !selectionMode },
+            trailing = {
+                IconButton(onClick = { onToggleExpand(group.mangaId) }) {
+                    Icon(
+                        imageVector = if (group.expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                        contentDescription = stringResource(
+                            if (group.expanded) MR.strings.action_collapse else MR.strings.action_expand,
                         ),
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            Icon(
-                imageVector = Icons.Outlined.ExpandMore,
-                contentDescription = stringResource(
-                    if (group.expanded) MR.strings.action_collapse else MR.strings.action_expand,
-                ),
-                modifier = Modifier.rotate(if (group.expanded) 180f else 0f),
-            )
-        }
+            },
+        )
         AnimatedVisibility(
             visible = group.expanded,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut(),
         ) {
             Column(
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.padding(bottom = MaterialTheme.padding.small),
             ) {
                 group.items.forEach { updatesItem ->
                     UpdatesUiItem(
@@ -276,6 +224,146 @@ private fun UpdatesMangaGroupItem(
                 }
             }
         }
+    }
+}
+
+/**
+ * Single-chapter update rendered in the same compact card as a group header:
+ * small cover, title, chapter/time metadata, existing download action
+ * trailing. No expand arrow — one chapter has nothing to expand.
+ */
+@Composable
+private fun UpdatesSingleChapterCard(
+    updatesItem: UpdatesItem,
+    selectionMode: Boolean,
+    onUpdateSelected: (UpdatesItem, Boolean, Boolean) -> Unit,
+    onClickCover: (UpdatesItem) -> Unit,
+    onClickUpdate: (UpdatesItem) -> Unit,
+    onDownloadChapter: (List<UpdatesItem>, ChapterDownloadAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptic = LocalHapticFeedback.current
+    val update = updatesItem.update
+    Card(
+        modifier = modifier
+            .padding(
+                horizontal = MaterialTheme.padding.medium,
+                vertical = MaterialTheme.padding.small,
+            )
+            .selectedBackground(updatesItem.selected)
+            .combinedClickable(
+                onClick = {
+                    when {
+                        selectionMode -> onUpdateSelected(updatesItem, !updatesItem.selected, false)
+                        else -> onClickUpdate(updatesItem)
+                    }
+                },
+                onLongClick = {
+                    onUpdateSelected(updatesItem, !updatesItem.selected, true)
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                },
+            )
+            .semantics { selected = updatesItem.selected },
+        shape = MaterialTheme.shapes.large,
+    ) {
+        UpdatesCompactCardHeader(
+            update = update,
+            hasUnread = !update.read,
+            readProgress = updatesItem.readProgressLabel(),
+            onClickCover = { onClickCover(updatesItem) }.takeIf { !selectionMode },
+            trailing = {
+                ChapterDownloadIndicator(
+                    enabled = !selectionMode,
+                    modifier = Modifier.padding(start = 4.dp),
+                    downloadStateProvider = updatesItem.downloadStateProvider,
+                    downloadProgressProvider = updatesItem.downloadProgressProvider,
+                    onClick = { onDownloadChapter(listOf(updatesItem), it) },
+                )
+            },
+        )
+    }
+}
+
+/**
+ * Shared compact card header: small cover, title, chapter/time metadata, and
+ * a trailing action. Groups trail the expand control; single chapters trail
+ * the download action.
+ */
+@Composable
+private fun UpdatesCompactCardHeader(
+    update: UpdatesWithRelations,
+    hasUnread: Boolean,
+    readProgress: String?,
+    onClickCover: (() -> Unit)?,
+    trailing: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = MaterialTheme.padding.small,
+                vertical = MaterialTheme.padding.small,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MangaCover.Book(
+            modifier = Modifier.width(52.dp),
+            data = update.coverData,
+            contentDescription = update.mangaTitle,
+            onClick = onClickCover,
+        )
+        Column(
+            modifier = Modifier
+                .padding(start = MaterialTheme.padding.small)
+                .weight(1f),
+        ) {
+            Text(
+                text = update.mangaTitle,
+                maxLines = 1,
+                style = MaterialTheme.typography.titleSmall,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hasUnread) {
+                    Icon(
+                        imageVector = Icons.Filled.Circle,
+                        contentDescription = stringResource(MR.strings.unread),
+                        modifier = Modifier
+                            .height(8.dp)
+                            .padding(end = 4.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    text = update.chapterName,
+                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(weight = 1f, fill = false),
+                )
+                DotSeparatorText()
+                Text(
+                    text = relativeTimeSpanString(update.dateFetch),
+                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (readProgress != null) {
+                    DotSeparatorText()
+                    Text(
+                        text = readProgress,
+                        maxLines = 1,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = DISABLED_ALPHA),
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        trailing()
     }
 }
 

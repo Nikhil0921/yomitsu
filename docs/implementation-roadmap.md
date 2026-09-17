@@ -51,7 +51,14 @@ There is exactly ONE.
 
 ```text
 CURRENT AUTHORIZED TASK:
-    NONE — awaiting user authorization.
+    Q8 FEED AUTO-PAGINATION 2026-09-16 (user-authorized):
+    IMPLEMENTED + GATES GREEN — device verification PENDING.
+    FeedScreen.kt: auto-pagination (selectedSourceId != null → near-end
+    threshold 5 → existing loadMore), compact source headers in All Sources
+    mode (labelMedium, 8dp/4dp padding, full-span, no divider).
+    FeedScreenModel.kt: UNTOUCHED. FeedScreenModelStateTest: 2 new tests
+    (9/9 total). Existing filtering/paging/section-state semantics unchanged.
+    Scope: FeedScreen.kt, FeedScreenModelStateTest.kt only.
 
     ANYMEX UI MODERNIZATION MICRO-BATCH 2026-09-13 (user-authorized,
     post-v0.5.4.1): smallest safe visual-correction set EXECUTED +
@@ -327,13 +334,15 @@ ui-implementation-map.md §21; do not redo).
 | Document | Status | Authority | Required update |
 |---|---|---|---|
 | **implementation-roadmap.md (this file)** | NEW, canonical | **AUTHORITATIVE** for all next-work decisions | Maintain §M on every change |
-| memory.md | Current through 2026-09-12 | EVIDENCE log (chronological) | Append this session's record; fix Known-issue #2 (mark RESOLVED — code audit disproved it) |
+| state.md | NEW 2026-09-16 (docs-compression restructure) | **CURRENT REPOSITORY STATE** (smallest startup file) | Update on every meaningful change |
+| memory.md | Compressed 2026-09-16: recent sessions + durable knowledge; full chronological history moved to history/session-logs.md (verbatim archive) | ACTIVE RECENT MEMORY + durable knowledge | Update with recent delta; archive older detail |
+| rules.md | §2 documentation/state-management protocol added 2026-09-16 | AUTHORITATIVE (MUST) + doc protocol | None |
+| history/session-logs.md | NEW 2026-09-16 (append-only archive; contains former memory.md verbatim) | HISTORICAL EVIDENCE ONLY — never execution authority | Append detailed session records |
 | phase.md | Current (pointer = artwork tray complete) | SECONDARY (history + 10B backlog) | Pointer update after RM-01; no structural change |
 | next-phase-plan.md | 2026-09-10 content, partially stale (Baseline says "v0.5.3 release = next" but v0.5.3 shipped; Part B row 12 cites resolved-as-open issue #2) | **SUPERSEDED** by this roadmap for all next-task decisions | Add supersession banner pointing here; correct Part B row 12; keep as historical plan evidence |
 | ui-implementation-map.md | Current through Batch 4/5 + 09-11 closures | AUTHORITATIVE for UI implementation specs | No change now; add ReaderArtworkTone + toolbar screen to §13/§14 when RM-01 docs pass runs (optional) |
 | prd.md | v0.5.3 header; accurate | AUTHORITATIVE (WHAT) | None (audit found no factual contradiction) |
 | architecture.md | v0.5.2-era header, §accurate otherwise | AUTHORITATIVE (HOW) | Header version bump + Known-issue #2 note + tone-feature paragraph when RM-01 docs run |
-| rules.md | Current | AUTHORITATIVE (MUST) | None |
 | design.md | Current (TtsPlaybackBar rows ratified 09-11) | AUTHORITATIVE (LOOK/FEEL) | None; add tone-tray paragraph optional |
 | design-audit.md | 2026-09-04 | HISTORICAL (superseded by ui-map §21/§24) | None (keep as evidence) |
 | branding.md | Current | AUTHORITATIVE (brand) | None |
@@ -429,5 +438,6 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 
 | 2026-09-13 | FEED UI CORRECTION (user-authorized; supersedes stacked-selector layout from master session): removed `All` listing chip from FeedFilterBar + Customize→Default listing; legacy null defaultListing → Popular fallback at prefs-read (no migration; "All sources" source dropdown untouched); compact primary row [Source selector][Popular][Latest] (single Row, horizontalScroll narrow-screen fallback, stable-width selector preserved); removed per-section duplicate source/listing FeedHeader; moved FilterBar into LazyVerticalGrid as first full-span item = natural collapse-on-scroll + return (zero custom scroll machinery); genre chip row preserved below primary row. Files: FeedScreen.kt, FeedScreenModel.kt. Gates green docker (spotlessCheck, testDebugUnitTest + verifySqlDelightMigration 2m59s, :app:assembleDebug 3m26s). Device-verified SM_M066B (debug 720px): row layout bounds (selector y209, Popular y209, Latest y209 — same row), zero `All` nodes, Popular↔Latest single-select with distinct result sets (data matches selection §18), genre Safe toggle off→on changes + restores results, chips honestly follow source filter leaves, collapse on swipe-down + return on swipe-up, Load more appends next page, persistence across force-stop/restart + ManageFeeds roundtrip, legacy empty default_listing → Popular selected, no crash/no NetworkOnMainThread in session logcat. UNCOMMITTED — awaiting user commit decision. | opencode feed-correction session |
 | 2026-09-13 | ANYMEX UI MODERNIZATION MICRO-BATCH (user-authorized post-v0.5.4.1; visual corrections only): DS-01 SettingsDictionaryScreen OCR-results group → PreferenceGroupCard (last grouped-settings holdout); DS-03 SettingsSearch rows 24/14dp → 16/12dp token rhythm; DS-06 Feed customize icon List → GridView; DS-02 compact-grid cover scrim Color(0xAA000000) → colorScheme.scrim.copy(0.67f); FeedCustomizeDialog gaps 8→12dp grouped-card rhythm. 4 files + docs. Reference = AnymeX hierarchy/grouping intent only (no cloning). Liquid/blur/IA-regroup/nav/Q3-Q8 explicitly NOT touched. Gates green docker (spotlessCheck + testDebugUnitTest + verifySqlDelightMigration + assembleDebug, chained 3m15s). Device SM_M066B smoke PASS: Dictionary card renders tonal + rows inside (px band verified), Settings search live w/ 16dp rows, Feed row+chips+customize sheet intact, Library grid + badges render, Recent Continue + Browse sources render, More Studies card intact, 0 FATAL. UNCOMMITTED. | opencode anymex-ui session |
+| 2026-09-16 | Q8 FEED AUTO-PAGINATION (user-authorized; scope: FeedScreen.kt + FeedScreenModelStateTest.kt only): (1) Auto-pagination: `selectedSourceId != null` gates trigger; `LazyGridState` + `snapshotFlow { nearEnd }.distinctUntilChanged()` → `onLoadMore(lastFeed)` when within `AUTO_LOAD_THRESHOLD = 5` items of grid end; `isLoadingMore`/`hasMore` guards preserved; existing `loadMore()` untouched; FeedScreenModel.kt UNTOUCHED. (2) All Sources source headers: when `selectedSourceId == null`, insert full-span `Text(sourceName, labelMedium, 8dp/4dp padding)` before each source section; no divider, no card, no AppBar; spacing intentionally minimal. (3) Tests: 2 new in FeedScreenModelStateTest (`single source without listing override shows both feeds`, `single source with listing override shows one feed`); 9/9 total. Gates green docker (spotlessCheck 35s, testDebugUnitTest 3m45s, :app:assembleDebug 4m4s). Device verification PENDING. Key design decision: `lastOrNull()` (not `singleOrNull()`) for trigger — correct for 1-feed (listing selected) and 2-feed (no listing) cases in single-source mode. | opencode feed-auto-pagination session |
 
 END OF ROADMAP.

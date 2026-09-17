@@ -1,6 +1,7 @@
 # Yomitsu — Engineering Rules (AI Rulebook)
 
-> AI agents MUST read this file (and `docs/memory.md`) before modifying code.
+> AI agents MUST read this file (and `docs/state.md`) before modifying code.
+> Documentation/state-management protocol: **§12** (startup order, precedence, updates, archival).
 > These rules are derived from the actual repository conventions, not generic style.
 > Where a rule conflicts with observed code, the repository wins — flag it in
 > `docs/memory.md` instead of "fixing" it silently.
@@ -19,8 +20,7 @@
 5. **Minimize changes.** Smallest change that satisfies the current phase
    (`docs/phase.md`). No drive-by refactors, no reformatting of untouched lines.
 6. **Follow the phase plan.** Do not jump ahead or mix phases in one change set.
-7. **Update `docs/memory.md` after meaningful work** (protocol at the bottom of
-   that file). Trivial formatting-only changes don't require an update.
+7. **Update `docs/state.md` after meaningful work** (immediate current state). Trivial formatting-only changes don't require an update.
 
 ## 2. Architecture rules
 
@@ -212,3 +212,87 @@ Rejected approaches).
 
 Never report success without running the relevant command and pasting/recording
 the result in `docs/memory.md`.
+
+## 12. Documentation & state management protocol
+
+### File precedence
+
+When information overlaps:
+
+```text
+implementation-roadmap.md
+    = execution authorization
+
+state.md
+    = current repository state
+
+rules.md
+    = engineering/documentation rules
+
+memory.md
+    = active recent memory + durable knowledge
+
+design.md
+    = visual/design authority
+
+ui-implementation-map.md
+    = detailed UI implementation reference
+
+phase.md
+    = phase history/status
+
+history/session-logs.md
+    = historical evidence/archive
+```
+
+Do NOT describe historical files as execution authority.
+
+### Startup protocol
+
+Agents MUST read in this order:
+
+1. `docs/state.md`
+2. `docs/rules.md`
+3. `docs/memory.md`
+4. `docs/implementation-roadmap.md`
+
+Only read additional documents when the current task requires them:
+
+- **UI task** → `design.md` / `ui-implementation-map.md` as triggered
+- **Historical investigation** → `history/session-logs.md`
+- **Phase-history question** → `phase.md`
+- **Architecture question** → `architecture.md` / relevant technical docs
+
+Never automatically load the entire documentation tree.
+
+### Update protocol
+
+After meaningful implementation work:
+
+1. Update `state.md` with new current state.
+2. Update `memory.md` with important recent-session delta (decisions/gotchas only).
+3. Append detailed session information to `history/session-logs.md`.
+4. Update `implementation-roadmap.md` only when roadmap state/authorization genuinely changes.
+5. Update `phase.md` only when phase status genuinely changes.
+6. Do NOT duplicate the complete session history across all files.
+
+### Archival rule
+
+When `memory.md` becomes large:
+
+- Preserve durable decisions/gotchas.
+- Keep the most recent 1–2 meaningful sessions.
+- Move older detailed session records to `history/session-logs.md`.
+- Never destroy useful historical evidence merely for token reduction.
+
+### Scope rule
+
+Documentation compression must NEVER become an excuse to:
+
+- Reopen completed phases
+- Inspect/implement Q3–Q8 while they are HARD HALTED
+- Select work independently
+- Change product architecture
+- Modify source code
+- Alter design decisions
+- Rewrite the canonical roadmap

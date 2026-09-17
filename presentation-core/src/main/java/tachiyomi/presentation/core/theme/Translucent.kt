@@ -26,6 +26,13 @@ val LocalAppBackground = staticCompositionLocalOf<Brush?> { null }
  */
 val LocalNavTranslucency = staticCompositionLocalOf { 0f }
 
+/**
+ * Popup/sheet modal translucency: 0 = opaque modal, otherwise the
+ * pre-blend alpha for content-area popups and sheets (bounded
+ * 0.70..0.92). User-controlled via the same intensity slider as nav.
+ */
+val LocalPopupTranslucency = staticCompositionLocalOf { 0f }
+
 private const val TRANSLUCENT_CONTAINER_ALPHA = 0.82f
 
 private const val FLOATING_CHROME_ALPHA = 0.85f
@@ -33,6 +40,10 @@ private const val FLOATING_CHROME_ALPHA = 0.85f
 // Bounded navigation-pill translucency range; beyond this text/icons suffer.
 private const val NAV_TRANSLUCENCY_MIN = 0.55f
 private const val NAV_TRANSLUCENCY_MAX = 0.92f
+
+// Bounded modal/sheet translucency range; beyond this text legibility suffers.
+private const val MODAL_TRANSLUCENCY_MIN = 0.70f
+private const val MODAL_TRANSLUCENCY_MAX = 0.92f
 
 /**
  * Maps a 0..100 intensity preference to the bounded nav translucency
@@ -44,12 +55,26 @@ fun navTranslucencyAlpha(intensityPercent: Int): Float {
 }
 
 /**
+ * Maps a 0..100 intensity preference to the bounded modal/sheet
+ * pre-blend alpha range. Same semantic direction as [navTranslucencyAlpha]:
+ * higher intensity → higher alpha → more opaque → less translucent.
+ * Pure — usable outside composition.
+ */
+fun modalTranslucencyAlpha(intensityPercent: Int): Float {
+    val t = (intensityPercent.coerceIn(0, 100)) / 100f
+    return MODAL_TRANSLUCENCY_MIN + (MODAL_TRANSLUCENCY_MAX - MODAL_TRANSLUCENCY_MIN) * t
+}
+
+/**
  * Chrome container color for the current mode: translucent (pre-blended
- * with background) when [LocalTranslucentSurfaces] is enabled, the
- * passed color untouched otherwise.
+ * with background) when [LocalPopupTranslucency] is enabled (user-controlled
+ * intensity) or [LocalTranslucentSurfaces] is enabled (legacy/frosted),
+ * the passed color untouched otherwise.
  */
 @androidx.compose.runtime.Composable
 fun Color.asChromeContainer(): Color {
+    val popupAlpha = LocalPopupTranslucency.current
+    if (popupAlpha > 0f) return asPreBlendedContainer(popupAlpha)
     if (!LocalTranslucentSurfaces.current) return this
     return asPreBlendedContainer(TRANSLUCENT_CONTAINER_ALPHA)
 }

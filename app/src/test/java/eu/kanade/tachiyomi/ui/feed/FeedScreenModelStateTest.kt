@@ -88,4 +88,16 @@ class FeedScreenModelStateTest {
         val s = state(feeds(bPopular, aPopular, aLatest), listingOverride = FeedListing.POPULAR)
         assertEquals(listOf(bPopular, aPopular), s.visibleFeeds)
     }
+
+    @Test
+    fun `single source without listing override shows both feeds`() {
+        val s = state(feeds(aPopular, aLatest), selectedSourceId = srcA)
+        assertEquals(listOf(aPopular, aLatest), s.visibleFeeds)
+    }
+
+    @Test
+    fun `single source with listing override shows one feed`() {
+        val s = state(feeds(aPopular, aLatest), selectedSourceId = srcA, listingOverride = FeedListing.POPULAR)
+        assertEquals(listOf(aPopular), s.visibleFeeds)
+    }
 }

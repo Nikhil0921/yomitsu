@@ -1,0 +1,22 @@
+# ML models (large, gitignored)
+app/src/main/assets/ocr/
+app/src/main/assets/ocr_fast/
+data/src/main/assets/panel_detector/
+
+# Build outputs
+build/
+.gradle/
+app/build/
+data/build/
+domain/build/
+
+# IDE
+.idea/
+.vscode/
+
+# Device artifacts
+.device-pass/
+*.hprof
+
+# Git
+.git/
