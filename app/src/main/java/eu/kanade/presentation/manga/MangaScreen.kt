@@ -2,9 +2,11 @@ package eu.kanade.presentation.manga
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -23,7 +26,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallExtendedFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -43,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastMap
@@ -99,6 +107,7 @@ fun MangaScreen(
     onFilterButtonClicked: () -> Unit,
     onRefresh: () -> Unit,
     onContinueReading: () -> Unit,
+    onScanNextOcrClicked: (() -> Unit)? = null,
     onSearch: (query: String, global: Boolean) -> Unit,
 
     // For cover dialog
@@ -153,6 +162,7 @@ fun MangaScreen(
             onFilterClicked = onFilterButtonClicked,
             onRefresh = onRefresh,
             onContinueReading = onContinueReading,
+            onScanNextOcrClicked = onScanNextOcrClicked,
             onSearch = onSearch,
             onCoverClicked = onCoverClicked,
             onShareClicked = onShareClicked,
@@ -190,6 +200,7 @@ fun MangaScreen(
             onFilterButtonClicked = onFilterButtonClicked,
             onRefresh = onRefresh,
             onContinueReading = onContinueReading,
+            onScanNextOcrClicked = onScanNextOcrClicked,
             onSearch = onSearch,
             onCoverClicked = onCoverClicked,
             onShareClicked = onShareClicked,
@@ -233,6 +244,7 @@ private fun MangaScreenSmallImpl(
     onFilterClicked: () -> Unit,
     onRefresh: () -> Unit,
     onContinueReading: () -> Unit,
+    onScanNextOcrClicked: (() -> Unit)? = null,
     onSearch: (query: String, global: Boolean) -> Unit,
 
     // For cover dialog
@@ -330,25 +342,12 @@ private fun MangaScreenSmallImpl(
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
-            val isFABVisible = remember(chapters) {
-                chapters.fastAny { !it.chapter.read } && !isAnySelected
-            }
-            SmallExtendedFloatingActionButton(
-                text = {
-                    val isReading = remember(state.chapters) {
-                        state.chapters.fastAny { it.chapter.read }
-                    }
-                    Text(
-                        text = stringResource(if (isReading) MR.strings.action_resume else MR.strings.action_start),
-                    )
-                },
-                icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
-                onClick = onContinueReading,
+            MangaFloatingActionButtons(
+                state = state,
+                isAnySelected = isAnySelected,
                 expanded = chapterListState.shouldExpandFAB(),
-                modifier = Modifier.animateFloatingActionButton(
-                    visible = isFABVisible,
-                    alignment = Alignment.BottomEnd,
-                ),
+                onContinueReading = onContinueReading,
+                onScanNextOcrClicked = onScanNextOcrClicked,
             )
         },
     ) { contentPadding ->
@@ -477,6 +476,7 @@ fun MangaScreenLargeImpl(
     onFilterButtonClicked: () -> Unit,
     onRefresh: () -> Unit,
     onContinueReading: () -> Unit,
+    onScanNextOcrClicked: (() -> Unit)? = null,
     onSearch: (query: String, global: Boolean) -> Unit,
 
     // For cover dialog
@@ -572,27 +572,12 @@ fun MangaScreenLargeImpl(
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
-            val isFABVisible = remember(chapters) {
-                chapters.fastAny { !it.chapter.read } && !isAnySelected
-            }
-            SmallExtendedFloatingActionButton(
-                text = {
-                    val isReading = remember(state.chapters) {
-                        state.chapters.fastAny { it.chapter.read }
-                    }
-                    Text(
-                        text = stringResource(
-                            if (isReading) MR.strings.action_resume else MR.strings.action_start,
-                        ),
-                    )
-                },
-                icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
-                onClick = onContinueReading,
+            MangaFloatingActionButtons(
+                state = state,
+                isAnySelected = isAnySelected,
                 expanded = chapterListState.shouldExpandFAB(),
-                modifier = Modifier.animateFloatingActionButton(
-                    visible = isFABVisible,
-                    alignment = Alignment.BottomEnd,
-                ),
+                onContinueReading = onContinueReading,
+                onScanNextOcrClicked = onScanNextOcrClicked,
             )
         },
     ) { contentPadding ->
@@ -835,5 +820,60 @@ private fun onChapterItemClick(
         chapterItem.selected -> onToggleSelection(false)
         isAnyChapterSelected -> onToggleSelection(true)
         else -> onChapterClicked(chapterItem.chapter)
+    }
+}
+
+@Composable
+private fun MangaFloatingActionButtons(
+    state: MangaScreenModel.State.Success,
+    isAnySelected: Boolean,
+    expanded: Boolean,
+    onContinueReading: () -> Unit,
+    onScanNextOcrClicked: (() -> Unit)?,
+) {
+    val isFABVisible = remember(state.processedChapters, isAnySelected) {
+        state.processedChapters.fastAny { !it.chapter.read } && !isAnySelected
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.animateFloatingActionButton(
+            visible = isFABVisible,
+            alignment = Alignment.BottomEnd,
+        ),
+    ) {
+        if (onScanNextOcrClicked != null) {
+            val isScanning = state.isNextOcrScanning
+            FilledIconButton(
+                onClick = onScanNextOcrClicked,
+                enabled = !isScanning,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                if (isScanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Outlined.DocumentScanner,
+                        contentDescription = stringResource(MR.strings.action_scan_next_chapter_ocr),
+                    )
+                }
+            }
+        }
+        SmallExtendedFloatingActionButton(
+            text = {
+                val isReading = remember(state.chapters) {
+                    state.chapters.fastAny { it.chapter.read }
+                }
+                Text(
+                    text = stringResource(if (isReading) MR.strings.action_resume else MR.strings.action_start),
+                )
+            },
+            icon = { Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null) },
+            onClick = onContinueReading,
+            expanded = expanded,
+        )
     }
 }

@@ -9,6 +9,10 @@ plugins {
 android {
     namespace = "tachiyomi.data"
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     sqldelight {
         databases {
             create("Database") {

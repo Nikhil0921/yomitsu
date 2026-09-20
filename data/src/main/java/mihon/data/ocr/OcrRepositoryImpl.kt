@@ -423,7 +423,10 @@ class OcrRepositoryImpl(
         priority: OcrScanPriority,
     ): OcrPageResult {
         return try {
-            submitTask(priority.toQueuePriority()) {
+            submitTask(
+                priority.toQueuePriority(),
+                diagnosticLabel = if (tachiyomi.data.BuildConfig.DEBUG) "chapter=$chapterId page=$pageIndex" else null,
+            ) {
                 // Bitmap lifecycle and caching live inside the task: callers may abandon the
                 // await on navigation, but a queued task runs to completion, recycles its own
                 // bitmap, and leaves the result cached for whoever asks next.
@@ -431,6 +434,12 @@ class OcrRepositoryImpl(
                     val regions = engineLocks.withTextEngineLock(EngineType.GLENS) {
                         val engine = glensEngine ?: GlensOcrEngine().also {
                             glensEngine = it
+                        }
+                        if (tachiyomi.data.BuildConfig.DEBUG) {
+                            logcat(LogPriority.DEBUG) {
+                                "OCR scan glens chapter=$chapterId page=$pageIndex priority=$priority " +
+                                    "scan=${System.identityHashCode(bitmap)} startNs=${System.nanoTime()}"
+                            }
                         }
                         engine.recognizePage(bitmap).regions
                     }
@@ -442,7 +451,20 @@ class OcrRepositoryImpl(
                         imageHeight = bitmap.height,
                         regions = regions,
                     )
-                }.also { cacheStore.upsert(it) }
+                }.also {
+                    val cacheStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+                    try {
+                        cacheStore.upsert(it)
+                    } finally {
+                        if (tachiyomi.data.BuildConfig.DEBUG) {
+                            val endedAt = System.nanoTime()
+                            logcat(LogPriority.DEBUG) {
+                                "OCR cache write chapter=$chapterId page=$pageIndex startNs=$cacheStartedAt " +
+                                    "endNs=$endedAt elapsedMs=${(endedAt - cacheStartedAt) / 1_000_000}"
+                            }
+                        }
+                    }
+                }
             }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
@@ -596,9 +618,10 @@ class OcrRepositoryImpl(
 
     private suspend fun <T> submitTask(
         priority: PrioritizedTaskQueue.Priority,
+        diagnosticLabel: String? = null,
         block: suspend () -> T,
     ): T {
-        return taskQueue.submit(priority, block)
+        return taskQueue.submit(priority, diagnosticLabel, block)
     }
 
     private fun OcrScanPriority.toQueuePriority(): PrioritizedTaskQueue.Priority = when (this) {

@@ -8,9 +8,41 @@
 
 ## Recent sessions (most recent first)
 
+### 2026-09-19 — OCR per-page loop resilience + "Scan Next Chapter" FAB (user master prompt)
+
+Two deliverables, uncommitted. (1) `OcrChapterScanner.kt` page loop: per-page try/catch (skip+continue on page decode/scan failure or timeout; CancellationException rethrown), `withTimeoutOrNull(pageScanTimeout)` around `scanPageOcr.await` (new ctor param `pageScanTimeout: Duration = PAGE_SCAN_TIMEOUT` = 90s, ctor default keeps DomainModule 8-arg call), progress now counts only scanned pages (`processedPages` counter), skip warn-log. New `OcrChapterScannerTest` (3 tests: all-succeed, one-page-exception skip, one-page-timeout skip) — key gotchas: relaxed-mock Context needs BOTH `getSystemService(Class)` AND `getSystemService(String)` stubs (androidx uses javaName); `Preference<Boolean>` relaxed mock returns raw Object for generic `get()` → stub explicitly; `OcrImage` validates positive dims → stub Bitmap width/height; nested MockK-stubbed suspends inside a mocked generic `WithOcrScanSession.await` leak COROUTINE_SUSPENDED → fixture uses REAL `WithOcrScanSession` over an object-expression `OcrRepository` instead. (2) FAB: `MangaScreenModel.scanNextUnreadChapter()` + `observeOcrQueue()` (collects `ocrScanManager.queueState`, sets `State.Success.isNextOcrScanning` when next-unread id queued non-ERROR); presentation `MangaScreen.kt` new `MangaFloatingActionButtons` composable (Row: FilledIconButton DocumentScanner + spinner when scanning, then existing SmallExtendedFAB, both impls); ui/manga/MangaScreen.kt wires `onScanNextOcrClicked = screenModel::scanNextUnreadChapter`; i18n `action_scan_next_chapter_ocr`. `MangaScreenModelErrorStateTest` needed `queueState` stub on its OcrScanManager mock. Gates: spotlessCheck + testDebugUnitTest + :app:assembleDebug all green 3m42s. No commit.
+
+### 2026-09-19 — STAGE 4P implementation: OCR prefetch timing optimization (integrated)
+
+One-line change: `maybePrefetchReaderOpenOcr(0)` added inside `loadNewChapter()` at `ReaderViewModel.kt:594` (after `loadChapter` succeeds), eliminating p0 HIGH queue wait (~0.615s) by starting page-0 OCR immediately on chapter load instead of waiting for `onPageSelected`. Existing `onPageSelected` trigger (same-chapter navigation) preserved. Cancellation/lifecycle intact (`readerOpenPrefetchJob?.cancel()` unchanged in `loadNewChapter`; `onCleared()` cleanup untouched). Gates green: spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 3m38s. ReaderOpenPrefetchGateTest 2/2, TtsReaderOpenPrefetchTest 3/3, FeedScreenModelStateTest 12/12. No commit. Stage 4P client prefetch timing optimization fully integrated.
+
+### 2026-09-19 — STAGE 4P OCR preload/prefetch forensic audit
+
+Read-only (no code/device/commit). Classification MIXED (client-scheduling dominant): p0 HIGH queue wait 0.615s when TTS prefetch p1/p2/p3 occupy all 3 slots. GLENS service wait irreducible client-side. Reader-open prefetch starts too late (after TTS start) for first-page latency optimization. TTS prefetch depth=3–4 at rate≥1.5x fills all 3 queue slots. Quantified: 0.615s p0 HIGH wait observed. Existing prefetch hides ~14s of ~27s total scan latency for settled reading (ch8222). Smallest experiment = move reader-open prefetch trigger from onPageSelected() to loadNewChapter() (NOW EXECUTED in Stage 4P implementation above). Branch closed.
+
+### 2026-09-19 — STAGE 4O next-task forensic reconciliation
+
+Read-only (no code/device/commit). Roadmap §B lists exactly ONE current authorized task: Q8 Feed auto-pagination (user-authorized 09-16; implementation complete, gates green, device verification PENDING). No other implementation task is authorized. Q8 Feed auto-pagination device verification = only outstanding item under current authorized task. All other OCR TTS stages 0–4N closed. Zero source changes.
+
+### 2026-09-19 — STAGE 4N voice-init forensic audit: engine-owned, HIDE shipped, closed
+
+Read-only (no code/device/commit). Cold init split (ch7877): awaitMs=5381 (onInit) + voicecfg 305ms (voices 66/engines 227/apply 9). Enumeration (B) + setVoice (C) refuted; repeats (D) refuted — single Create, idempotent fast-path; re-apply ~250ms/resume only. Artifact (E) refuted — await is genuine Google TTS service latency (28.9s anomalous boot observed). HIDE (F) already shipped via 2D eager init (43s pre-tap → 81ms reuse). Only REDUCE seam: skip redundant voicecfg re-apply on unchanged prefs (~250ms/resume) — NOT first-speech path, needs authorization. Branch closed.
+
+### 2026-09-19 — STAGE 4M split: SERVICE-DOMINANT, transport closed
+
+ch8475 fresh uncached (pid-pure: 5 scans, 29 uploads, 29×HTTP200, zero failures). Upload med 3ms / p90 4.9s (first-batch handshakes only) vs post-upload wait med 9.6s / p90 17.9s. Steady-state upload ~0.03% of tile time; per-page client cost ≈ one handshake vs 18–29s page totals. TTS smoke OK (18 dispatches). No code change (4E seam reused). No commit.
+
+### 2026-09-19 — STAGE 4L device validation PASS (production C=4, 4K/4L closed)
+
+SM_M066B, cert e486ea, install -r, cold. ch8447 (Reborn Ranker ch1) p0–15 scanned: 160×HTTP 200, zero non-2xx/exceptions (3 FATALs stale 09-15/16 ring buffer); 11-tile scan ran max 4 concurrent; regions 0–19/page healthy; TTS start→speech p0→p12 (167 dispatches, 26 advances) to user p13, no crashes. Gates re-green 3m24s. No commit.
+
+### 2026-09-19 — STAGE 4K shipped (TILE_CONCURRENCY 3→4, uncommitted)
+
+One-line production change (`GlensOcrEngine.kt:1023`). Gates green in one container run (3m48s: spotlessCheck + testDebugUnitTest + :app:assembleDebug, docker -Xmx4g both volumes). No test asserts the constant; no test modified. Prior-stage test-only seam hunks in same file untouched. No device install, no commit per task.
+
 ### 2026-09-16 — Feed auto-pagination + All Sources source headers (uncommitted)
 
-User-authorized Q8: single-source auto-pagination (near-end threshold=5) + compact source headers in All Sources mode. FeedScreen.kt only — FeedScreenModel.kt untouched. `selectedSourceId != null` gates auto-pagination (not visibleFeeds count — correct for single-enabled-source edge case). `lastOrNull()` triggers for the last visible feed section. Source headers: `labelMedium`, 8dp/4dp padding, full-span, no divider. Tests: 2 new in FeedScreenModelStateTest (9/9 total). Gates green: spotlessCheck 35s, testDebugUnitTest 3m45s, :app:assembleDebug 4m4s. Device verification PENDING.
+User-authorized Q8: single-source auto-pagination (near-end threshold=5) + compact source headers in All Sources mode. FeedScreen.kt only — FeedScreenModel.kt untouched. `selectedSourceId != null` gates auto-pagination (not visibleFeeds count — correct for single-enabled-source edge case). `lastOrNull()` triggers for the last visible feed section. Source headers: `labelMedium`, 8dp/4dp padding, full-span, no divider. Tests: 2 new in FeedScreenModelStateTest (9/9 total). Gates green: spotlessCheck 35s, testDebugUnitTest 3m45s, :app:assembleDebug 4m4s. **Device verification COMPLETED (user-verified 09-19)**: auto-pagination functions correctly for single-source listings and popular/latest feeds. Q8 CLOSED.
 
 ### 2026-09-16 — Single-chapter Updates unified with compact card (uncommitted)
 

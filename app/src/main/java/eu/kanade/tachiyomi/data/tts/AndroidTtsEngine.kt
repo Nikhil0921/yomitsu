@@ -71,7 +71,13 @@ class AndroidTtsEngine(
             }.apply {
                 setOnUtteranceProgressListener(
                     object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) = Unit
+                        override fun onStart(utteranceId: String?) {
+                            if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+                                logcat(LogPriority.DEBUG) {
+                                    "TTS onStart id=$utteranceId startNs=${System.nanoTime()}"
+                                }
+                            }
+                        }
 
                         override fun onDone(utteranceId: String?) {
                             completeUtterance(utteranceId, success = true)
@@ -96,11 +102,17 @@ class AndroidTtsEngine(
             }
         }
 
+        val awaitStart = if (eu.kanade.tachiyomi.BuildConfig.DEBUG) System.nanoTime() else 0L
         val success = try {
             readiness.await()
         } catch (e: CancellationException) {
             withContext(Dispatchers.Main) { engine.shutdown() }
             throw e
+        }
+        if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS init readiness awaitMs=${(System.nanoTime() - awaitStart) / 1_000_000}"
+            }
         }
         if (!success) {
             withContext(Dispatchers.Main) { engine.shutdown() }
@@ -209,13 +221,19 @@ class AndroidTtsEngine(
     }
 
     private fun applyVoiceConfig(engine: TextToSpeech) {
+        val debug = eu.kanade.tachiyomi.BuildConfig.DEBUG
+        val cfgStart = if (debug) System.nanoTime() else 0L
         voiceName = voicePreferences.ttsVoiceName().get()
         languageTag = voicePreferences.ttsLanguageTag().get()
-
+        val voicesStart = if (debug) System.nanoTime() else 0L
         val voices = engine.voices.orEmpty()
+        val voicesMs = if (debug) (System.nanoTime() - voicesStart) / 1_000_000 else 0L
         val availableVoiceNames = voices.map { it.name }.toSet()
         val availableLanguageTags = voices.map { it.locale.toLanguageTag() }.toSet()
+        val enginesStart = if (debug) System.nanoTime() else 0L
         val availableEnginePackages = engine.engines.orEmpty().map { it.name }.toSet()
+        val enginesMs = if (debug) (System.nanoTime() - enginesStart) / 1_000_000 else 0L
+        val applyStart = if (debug) System.nanoTime() else 0L
 
         when (
             resolveVoiceSelection(
@@ -262,6 +280,13 @@ class AndroidTtsEngine(
                 } else {
                     logcat(LogPriority.DEBUG) { "TTS language applied tag=$languageTag" }
                 }
+            }
+        }
+        if (debug) {
+            val now = System.nanoTime()
+            logcat(LogPriority.DEBUG) {
+                "TTS voicecfg voicesMs=$voicesMs enginesMs=$enginesMs " +
+                    "resolveApplyMs=${(now - applyStart) / 1_000_000} totalMs=${(now - cfgStart) / 1_000_000}"
             }
         }
     }

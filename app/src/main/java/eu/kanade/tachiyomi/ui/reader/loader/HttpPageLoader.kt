@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
+import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
 import eu.kanade.tachiyomi.source.model.Page
@@ -17,6 +18,7 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.PriorityBlockingQueue
@@ -173,6 +175,13 @@ internal class HttpPageLoader(
      * @param page the page whose source image has to be downloaded.
      */
     private suspend fun internalLoadPage(page: ReaderPage, force: Boolean) {
+        val startNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (BuildConfig.DEBUG) {
+            logcat {
+                "HttpPageLoader internalLoadPage start chapter=${chapter.chapter.id} page=${page.index} " +
+                    "startNs=$startNs status=${page.status.javaClass.simpleName}"
+            }
+        }
         try {
             if (page.imageUrl.isNullOrEmpty()) {
                 page.status = Page.State.LoadPage
@@ -192,6 +201,14 @@ internal class HttpPageLoader(
             page.status = Page.State.Error(e)
             if (e is CancellationException) {
                 throw e
+            }
+        } finally {
+            if (BuildConfig.DEBUG) {
+                logcat {
+                    "HttpPageLoader internalLoadPage end chapter=${chapter.chapter.id} page=${page.index} " +
+                        "startNs=$startNs elapsedNs=${System.nanoTime() - startNs} " +
+                        "status=${page.status.javaClass.simpleName}"
+                }
             }
         }
     }

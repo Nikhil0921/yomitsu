@@ -118,7 +118,7 @@ fun FeedScreen(
     var showCustomizeDialog by remember { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
 
-    LaunchedEffect(gridState) {
+    LaunchedEffect(gridState, state) {
         snapshotFlow {
             val layout = gridState.layoutInfo
             val lastVisible = layout.visibleItemsInfo.lastOrNull()?.index ?: 0

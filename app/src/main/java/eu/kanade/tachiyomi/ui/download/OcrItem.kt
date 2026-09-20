@@ -37,13 +37,11 @@ internal class OcrItem(
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other is OcrItem) {
-            return ocrQueueItem.chapterId == other.ocrQueueItem.chapterId
-        }
-        return false
+        if (other !is OcrItem) return false
+        return ocrQueueItem == other.ocrQueueItem
     }
 
     override fun hashCode(): Int {
-        return ocrQueueItem.chapterId.hashCode()
+        return ocrQueueItem.hashCode()
     }
 }

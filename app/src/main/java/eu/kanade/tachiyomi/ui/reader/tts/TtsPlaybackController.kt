@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.tts
 
 import android.os.SystemClock
+import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
 import eu.kanade.tachiyomi.util.ocr.toOcrImage
 import kotlinx.coroutines.CancellationException
@@ -165,6 +166,11 @@ internal class TtsPlaybackController(
     }
 
     fun start(context: TtsChapterContext, startPageIndex: Int) {
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS start startNs=${System.nanoTime()} chapter=${context.chapter.id} page=$startPageIndex"
+            }
+        }
         resetSession(stoppedFlag = true)
         this.context = context
         stopped = false
@@ -172,6 +178,13 @@ internal class TtsPlaybackController(
         sessionStartedAtElapsed = SystemClock.elapsedRealtime()
         mutableState.value = TtsPlaybackState(phase = TtsPhase.Preparing, pageIndex = startPageIndex)
         playbackJob = scope.launch { runPlayback(startPageIndex) }
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS startup prefetch schedule page=${startPageIndex + 1} " +
+                    "depth=${prefetchDepth()} totalPages=${context.totalPages}"
+            }
+        }
+        schedulePrefetch(context, startPageIndex + 1)
     }
 
     fun pause() {
@@ -221,6 +234,19 @@ internal class TtsPlaybackController(
         context = null
         resetSession(stoppedFlag = true)
         mutableState.value = TtsPlaybackState(phase = TtsPhase.Idle)
+    }
+
+    /**
+     * Reader-open opportunistic OCR for [pageIndex]: best-effort [scanOnDemand]
+     * through the normal cache/in-flight/queue path. A later [start] for the
+     * same page joins the in-flight scan or hits the cache instead of
+     * re-scanning. Failures stay silent; the normal acquisition path reports
+     * its own errors when the user reaches the page.
+     */
+    fun prefetchReaderOpenPage(ctx: TtsChapterContext, pageIndex: Int): Job {
+        return scope.launch {
+            scanOnDemand(ctx, pageIndex, reportFailure = false)
+        }
     }
 
     fun nextSentence() = stepBy(1)
@@ -391,6 +417,12 @@ internal class TtsPlaybackController(
                 val spoke = try {
                     // Auto-scroll to the sentence's region before speaking (webtoon sync)
                     eventChannel.send(TtsEvent.ScrollToRegion(pageIndex, sentence.boundingBox))
+                    if (BuildConfig.DEBUG) {
+                        logcat(LogPriority.DEBUG) {
+                            "TTS speak dispatch startNs=${System.nanoTime()} id=$id " +
+                                "chapter=${ctx.chapter.id} page=$pageIndex sentence=$sentenceIndex"
+                        }
+                    }
                     engine.speak(id, sentence.text)
                 } catch (e: CancellationException) {
                     throw e
@@ -488,9 +520,15 @@ internal class TtsPlaybackController(
     }
 
     private suspend fun ensureInitialized(): Boolean {
+        val startNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
         if (!engine.initialize()) {
             fail(TtsError.EngineError)
             return false
+        }
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS init reuse initMs=${(System.nanoTime() - startNs) / 1_000_000}"
+            }
         }
         engine.acquireFocus()
         return true
@@ -505,6 +543,12 @@ internal class TtsPlaybackController(
         }
         val ctx = context ?: return@withIOContext emptyList()
         val acquireStartedAt = SystemClock.elapsedRealtime()
+        val acquireStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS acquire start chapter=${ctx.chapter.id} page=$pageIndex startNs=$acquireStartNs"
+            }
+        }
         val cached = try {
             getCachedPageOcr.await(ctx.chapter.id, pageIndex)
         } catch (e: CancellationException) {
@@ -517,6 +561,12 @@ internal class TtsPlaybackController(
             "TTS OCR ${if (cached != null) "cache hit" else "cache miss"} chapter=${ctx.chapter.id} page=$pageIndex"
         }
         val result = cached ?: scanOnDemand(ctx, pageIndex) ?: return@withIOContext null
+        val exclusionLookupStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS exclusion lookup start chapter=${ctx.chapter.id} page=$pageIndex startNs=$exclusionLookupStartNs"
+            }
+        }
         val zones = if (preferences.ttsOcrExclusionsEnabled().get()) {
             try {
                 getExclusionZones.awaitForSpeech(ctx.manga.id, ctx.manga.source, ctx.chapter.id)
@@ -529,6 +579,19 @@ internal class TtsPlaybackController(
         } else {
             emptyList()
         }
+        if (BuildConfig.DEBUG) {
+            val endNs = System.nanoTime()
+            logcat(LogPriority.DEBUG) {
+                "TTS exclusion lookup end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                    "elapsedNs=${endNs - exclusionLookupStartNs} zones=${zones.size}"
+            }
+        }
+        val exclusionMatchStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS exclusion match start chapter=${ctx.chapter.id} page=$pageIndex startNs=$exclusionMatchStartNs"
+            }
+        }
         val regions = result.regions.applyExclusions(
             zones,
             ExclusionMatchContext(
@@ -538,6 +601,13 @@ internal class TtsPlaybackController(
                 pageIndex = pageIndex,
             ),
         )
+        if (BuildConfig.DEBUG) {
+            val endNs = System.nanoTime()
+            logcat(LogPriority.DEBUG) {
+                "TTS exclusion match end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                    "elapsedNs=${endNs - exclusionMatchStartNs} regions=${regions.size}"
+            }
+        }
         if (zones.isNotEmpty()) {
             val typeCounts = zones.groupingBy { it.matchType.name }.eachCount()
             logcat(LogPriority.DEBUG) {
@@ -556,6 +626,12 @@ internal class TtsPlaybackController(
                 }
             }
         }
+        val segmentStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "TTS segment/filter start chapter=${ctx.chapter.id} page=$pageIndex startNs=$segmentStartNs"
+            }
+        }
         val dedupedRegions = SpeechPipeline.dedupeOverlappingDuplicates(regions)
         if (dedupedRegions.size < regions.size) {
             logcat(LogPriority.DEBUG) {
@@ -568,6 +644,17 @@ internal class TtsPlaybackController(
             filterConfig = preferences.speechRegionFilterConfig(),
             cleanupOptions = preferences.speechCleanupOptions(),
         )
+        if (BuildConfig.DEBUG) {
+            val endNs = System.nanoTime()
+            logcat(LogPriority.DEBUG) {
+                "TTS segment/filter end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                    "elapsedNs=${endNs - segmentStartNs} sentences=${sentences.size}"
+            }
+            logcat(LogPriority.DEBUG) {
+                "TTS acquire usable end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                    "elapsedNs=${endNs - acquireStartNs} sentences=${sentences.size}"
+            }
+        }
         val acquireMs = SystemClock.elapsedRealtime() - acquireStartedAt
         logcat(LogPriority.DEBUG) {
             "TTS page=$pageIndex segmented sentences=${sentences.size} regions=${result.regions.size} " +
@@ -595,17 +682,84 @@ internal class TtsPlaybackController(
         logcat(LogPriority.DEBUG) { "TTS on-demand scan start chapter=${ctx.chapter.id} page=$pageIndex" }
         withIOContext {
             withOcrScanSession.await {
-                val pages = pageSourceResolver.resolve(ctx.manga, ctx.chapter)
+                val resolveStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                if (BuildConfig.DEBUG) {
+                    logcat(LogPriority.DEBUG) {
+                        "TTS resolve start chapter=${ctx.chapter.id} page=$pageIndex startNs=$resolveStartNs"
+                    }
+                }
+                val pages = try {
+                    pageSourceResolver.resolve(ctx.manga, ctx.chapter)
+                } finally {
+                    if (BuildConfig.DEBUG) {
+                        val endNs = System.nanoTime()
+                        logcat(LogPriority.DEBUG) {
+                            "TTS resolve end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                                "elapsedNs=${endNs - resolveStartNs}"
+                        }
+                    }
+                }
                 pages.use { resolved ->
                     val input = resolved.getPageInput(pageIndex) ?: return@use null
-                    val bitmap: android.graphics.Bitmap = input.openBitmap() ?: return@use null
+                    val bitmapStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                    if (BuildConfig.DEBUG) {
+                        logcat(LogPriority.DEBUG) {
+                            "TTS openBitmap start chapter=${ctx.chapter.id} page=$pageIndex startNs=$bitmapStartNs"
+                        }
+                    }
+                    val bitmap: android.graphics.Bitmap = try {
+                        input.openBitmap()
+                    } finally {
+                        if (BuildConfig.DEBUG) {
+                            val endNs = System.nanoTime()
+                            logcat(LogPriority.DEBUG) {
+                                "TTS openBitmap end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                                    "elapsedNs=${endNs - bitmapStartNs}"
+                            }
+                        }
+                    } ?: return@use null
                     try {
-                        scanPageOcr.await(
-                            ctx.chapter.id,
-                            pageIndex,
-                            bitmap.toOcrImage(),
-                            priority = if (reportFailure) OcrScanPriority.HIGH else OcrScanPriority.NORMAL,
-                        )
+                        val conversionStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                        if (BuildConfig.DEBUG) {
+                            logcat(LogPriority.DEBUG) {
+                                "TTS toOcrImage start chapter=${ctx.chapter.id} page=$pageIndex startNs=$conversionStartNs"
+                            }
+                        }
+                        val image = try {
+                            bitmap.toOcrImage()
+                        } finally {
+                            if (BuildConfig.DEBUG) {
+                                val endNs = System.nanoTime()
+                                logcat(LogPriority.DEBUG) {
+                                    "TTS toOcrImage end chapter=${ctx.chapter.id} page=$pageIndex endNs=$endNs " +
+                                        "elapsedNs=${endNs - conversionStartNs}"
+                                }
+                            }
+                        }
+                        val scanStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                        if (BuildConfig.DEBUG) {
+                            logcat(LogPriority.DEBUG) {
+                                "TTS scanPageOcr await start chapter=${ctx.chapter.id} page=$pageIndex " +
+                                    "startNs=$scanStartNs priority=${if (reportFailure) "HIGH" else "NORMAL"}"
+                            }
+                        }
+                        try {
+                            scanPageOcr.await(
+                                ctx.chapter.id,
+                                pageIndex,
+                                image,
+                                priority = if (reportFailure) OcrScanPriority.HIGH else OcrScanPriority.NORMAL,
+                            )
+                        } finally {
+                            if (BuildConfig.DEBUG) {
+                                val endNs = System.nanoTime()
+                                logcat(LogPriority.DEBUG) {
+                                    "TTS scanPageOcr await end chapter=${ctx.chapter.id} page=$pageIndex " +
+                                        "endNs=$endNs elapsedNs=${endNs - scanStartNs} " +
+                                        "priority=${if (reportFailure) "HIGH" else "NORMAL"}"
+                                }
+                            }
+                        }
                     } finally {
                         if (!bitmap.isRecycled) bitmap.recycle()
                     }
@@ -641,6 +795,13 @@ internal class TtsPlaybackController(
         val targetPages = startPageIndex until minOf(startPageIndex + prefetchDepth(), ctx.totalPages)
         // Guard: skip if these exact pages are already being prefetched.
         if (targetPages.isEmpty() || (prefetchPages == targetPages && prefetchJob?.isActive == true)) {
+            if (BuildConfig.DEBUG) {
+                logcat(LogPriority.DEBUG) {
+                    "TTS prefetch skip target=${targetPages.first}..${targetPages.last} " +
+                        "current=${prefetchPages?.first ?: "?"}..${prefetchPages?.last ?: "?"} " +
+                        "jobActive=${prefetchJob?.isActive == true}"
+                }
+            }
             return
         }
         prefetchPages = targetPages

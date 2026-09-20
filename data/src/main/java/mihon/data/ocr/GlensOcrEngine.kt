@@ -21,6 +21,42 @@ import java.net.URL
 import kotlin.random.Random
 
 /**
+ * Tile-top offsets for the tiled tall-strip path. Pure function of geometry plus the
+ * tile-height rule, so tile math is unit-testable without network or Bitmaps.
+ *
+ * @param tileHeightFor test-only height override (same-page A/B harness); null selects
+ * the production rule `min(width * TILE_ASPECT_RATIO, MAX_IMAGE_DIMENSION)`. Production
+ * call sites always pass null, so committed runtime behavior is unchanged.
+ */
+internal data class Tiling(
+    val tileHeight: Int,
+    val tops: List<Int>,
+)
+
+internal fun tileTopsFor(
+    width: Int,
+    height: Int,
+    tileHeightFor: ((width: Int) -> Int)? = null,
+    tileAspectRatio: Float = 1.8f,
+    maxTileHeight: Int = 1500,
+    minTileHeight: Int = 1000,
+    overlapRatio: Float = 0.2f,
+): Tiling {
+    val tileHeight = (tileHeightFor?.invoke(width) ?: minOf((width * tileAspectRatio).toInt(), maxTileHeight))
+        .coerceAtLeast(minTileHeight)
+    val step = tileHeight - (tileHeight * overlapRatio).toInt()
+    val tops = buildList {
+        var tileTop = 0
+        while (true) {
+            add(tileTop)
+            if (tileTop + tileHeight >= height) break
+            tileTop += step
+        }
+    }
+    return Tiling(tileHeight, tops)
+}
+
+/**
  * OCR engine backed by Google Lens online OCR.
  * Extracts plain text from text-layout boxes in the protobuf response.
  */
@@ -43,14 +79,36 @@ internal class GlensOcrEngine : OcrEngine {
         }
     }
 
-    internal suspend fun recognizePage(image: Bitmap): GlensPageResult = withContext(Dispatchers.IO) {
+    internal suspend fun recognizePage(
+        image: Bitmap,
+        tileHeightFor: ((width: Int) -> Int)? = null,
+        tileOverlapRatio: Float? = null,
+        tileConcurrency: Int? = null,
+    ): GlensPageResult = withContext(Dispatchers.IO) {
         require(!image.isRecycled) { "Input bitmap is recycled" }
 
         val startTime = System.nanoTime()
+        val scanId = System.identityHashCode(image)
+        if (tachiyomi.data.BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "OCR(glens) page start scan=$scanId startNs=$startTime"
+            }
+        }
         try {
-            val regions = if (isTallStrip(image)) recognizeTiled(image) else recognizeSingle(image)
+            val regions = if (isTallStrip(image)) {
+                recognizeTiled(image, scanId, tileHeightFor, tileOverlapRatio, tileConcurrency)
+            } else {
+                recognizeSingle(image, scanId)
+            }
+            val postStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
             val ordered = dedupeOverlapping(regions).mapIndexed { index, region ->
                 region.copy(order = index)
+            }
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) page postprocess scan=$scanId in=${regions.size} out=${ordered.size}" +
+                        " elapsed=${(System.nanoTime() - postStartedAt) / 1_000_000}ms"
+                }
             }
             logcat(LogPriority.DEBUG) {
                 "OCR(glens) page result: ${ordered.size} regions, tiled=${isTallStrip(image)}"
@@ -76,11 +134,32 @@ internal class GlensOcrEngine : OcrEngine {
     private fun isTallStrip(image: Bitmap): Boolean =
         image.height > image.width * STRIP_ASPECT_RATIO && image.height > MAX_IMAGE_DIMENSION
 
-    private suspend fun recognizeSingle(image: Bitmap): List<OcrRegion> {
-        val preparedImage = prepareImage(image)
-        val payload = buildRequestPayload(preparedImage)
-        val responseBytes = executeRequest(payload)
-        return parseResponsePage(responseBytes).regions.map { it.copy(order = 0) }
+    private suspend fun recognizeSingle(image: Bitmap, scanId: Int? = null): List<OcrRegion> {
+        val preparedStart = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+        val payload = try {
+            buildRequestPayload(prepareImage(image))
+        } finally {
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                val endNs = System.nanoTime()
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) preprocess scan=$scanId tile=single startNs=$preparedStart endNs=$endNs" +
+                        " elapsed=${(endNs - preparedStart) / 1_000_000}ms"
+                }
+            }
+        }
+        val responseBytes = executeRequest(payload, scanId)
+        val parseStart = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+        return try {
+            parseResponsePage(responseBytes).regions.map { it.copy(order = 0) }
+        } finally {
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                val endNs = System.nanoTime()
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) parse/remap scan=$scanId tile=single startNs=$parseStart endNs=$endNs" +
+                        " elapsed=${(endNs - parseStart) / 1_000_000}ms"
+                }
+            }
+        }
     }
 
     /**
@@ -88,28 +167,31 @@ internal class GlensOcrEngine : OcrEngine {
      * full image. Tiles are uploaded [TILE_CONCURRENCY] at a time: each tile is an independent
      * Lens round trip, and serializing them dominated uncached-page latency on long strips.
      */
-    private suspend fun recognizeTiled(image: Bitmap): List<OcrRegion> = coroutineScope {
-        val tileHeight = minOf((image.width * TILE_ASPECT_RATIO).toInt(), MAX_IMAGE_DIMENSION)
-            .coerceAtLeast(MIN_TILE_HEIGHT)
-        val step = tileHeight - (tileHeight * TILE_OVERLAP_RATIO).toInt()
+    private suspend fun recognizeTiled(
+        image: Bitmap,
+        scanId: Int? = null,
+        tileHeightFor: ((width: Int) -> Int)? = null,
+        tileOverlapRatio: Float? = null,
+        tileConcurrency: Int? = null,
+    ): List<OcrRegion> = coroutineScope {
+        // Test-only overlap override; null preserves the production 0.2 ratio.
+        val tiling = tileTopsFor(
+            image.width,
+            image.height,
+            tileHeightFor,
+            overlapRatio = tileOverlapRatio ?: 0.2f,
+        )
+        val tileHeight = tiling.tileHeight
+        val tileTops = tiling.tops
 
-        val tileTops = buildList {
-            var tileTop = 0
-            while (true) {
-                add(tileTop)
-                if (tileTop + tileHeight >= image.height) break
-                tileTop += step
-            }
-        }
-
-        val gate = Semaphore(TILE_CONCURRENCY)
+        val gate = Semaphore(tileConcurrency ?: TILE_CONCURRENCY)
         tileTops.map { tileTop ->
             async {
                 gate.withPermit {
                     val tileBottom = minOf(tileTop + tileHeight, image.height)
                     val tile = Bitmap.createBitmap(image, 0, tileTop, image.width, tileBottom - tileTop)
                     try {
-                        recognizeTile(tile, tileTop, tileBottom, image.height)
+                        recognizeTile(tile, tileTop, tileBottom, image.height, scanId)
                     } finally {
                         if (!tile.isRecycled) tile.recycle()
                     }
@@ -123,23 +205,61 @@ internal class GlensOcrEngine : OcrEngine {
         tileTop: Int,
         tileBottom: Int,
         imageHeight: Int,
+        scanId: Int? = null,
     ): List<OcrRegion> {
-        val preparedImage = prepareImage(tile)
-        val payload = buildRequestPayload(preparedImage)
-        val responseBytes = executeRequest(payload)
-        return parseResponsePage(responseBytes).regions.map { region ->
-            // Region box is normalized to the tile; rescale into full-image coordinates.
-            val absoluteTop = tileTop + region.boundingBox.top * (tileBottom - tileTop)
-            val absoluteBottom = tileTop + region.boundingBox.bottom * (tileBottom - tileTop)
-            region.copy(
-                order = 0,
-                boundingBox = OcrBoundingBox(
-                    left = region.boundingBox.left,
-                    top = (absoluteTop / imageHeight).coerceIn(0f, 1f),
-                    right = region.boundingBox.right,
-                    bottom = (absoluteBottom / imageHeight).coerceIn(0f, 1f),
-                ),
-            )
+        val tileStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+        if (tachiyomi.data.BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "OCR(glens) tile start scan=$scanId tile=$tileTop bottom=$tileBottom startNs=$tileStartedAt"
+            }
+        }
+        return try {
+            val preparedStart = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+            val payload = try {
+                buildRequestPayload(prepareImage(tile))
+            } finally {
+                if (tachiyomi.data.BuildConfig.DEBUG) {
+                    val endNs = System.nanoTime()
+                    logcat(LogPriority.DEBUG) {
+                        "OCR(glens) preprocess scan=$scanId tile=$tileTop startNs=$preparedStart endNs=$endNs" +
+                            " elapsed=${(endNs - preparedStart) / 1_000_000}ms"
+                    }
+                }
+            }
+            val responseBytes = executeRequest(payload, scanId, tileTop)
+            val parseStart = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+            try {
+                parseResponsePage(responseBytes).regions.map { region ->
+                    // Region box is normalized to the tile; rescale into full-image coordinates.
+                    val absoluteTop = tileTop + region.boundingBox.top * (tileBottom - tileTop)
+                    val absoluteBottom = tileTop + region.boundingBox.bottom * (tileBottom - tileTop)
+                    region.copy(
+                        order = 0,
+                        boundingBox = OcrBoundingBox(
+                            left = region.boundingBox.left,
+                            top = (absoluteTop / imageHeight).coerceIn(0f, 1f),
+                            right = region.boundingBox.right,
+                            bottom = (absoluteBottom / imageHeight).coerceIn(0f, 1f),
+                        ),
+                    )
+                }
+            } finally {
+                if (tachiyomi.data.BuildConfig.DEBUG) {
+                    val endNs = System.nanoTime()
+                    logcat(LogPriority.DEBUG) {
+                        "OCR(glens) parse/remap scan=$scanId tile=$tileTop startNs=$parseStart endNs=$endNs" +
+                            " elapsed=${(endNs - parseStart) / 1_000_000}ms"
+                    }
+                }
+            }
+        } finally {
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                val endNs = System.nanoTime()
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) tile end scan=$scanId tile=$tileTop startNs=$tileStartedAt endNs=$endNs" +
+                        " elapsed=${(endNs - tileStartedAt) / 1_000_000}ms"
+                }
+            }
         }
     }
 
@@ -236,7 +356,12 @@ internal class GlensOcrEngine : OcrEngine {
         }.toByteArray()
     }
 
-    private fun executeRequest(payload: ByteArray): ByteArray {
+    private fun executeRequest(payload: ByteArray, scanId: Int? = null, tileTop: Int? = null): ByteArray {
+        if (tachiyomi.data.BuildConfig.DEBUG) {
+            logcat(LogPriority.DEBUG) {
+                "OCR(glens) payload scan=$scanId tile=$tileTop payloadBytes=${payload.size}"
+            }
+        }
         val connection = (URL(LENS_ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
@@ -250,23 +375,43 @@ internal class GlensOcrEngine : OcrEngine {
             setRequestProperty("Sec-Fetch-Dest", "empty")
         }
 
+        val httpStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
         return try {
             connection.outputStream.use { output ->
                 output.write(payload)
             }
+            val uploadEndNs = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
 
             val statusCode = connection.responseCode
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                val endNs = System.nanoTime()
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) http scan=$scanId tile=$tileTop status=$statusCode" +
+                        " startNs=$httpStartedAt endNs=$endNs elapsed=${(endNs - httpStartedAt) / 1_000_000}ms"
+                }
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) upload scan=$scanId tile=$tileTop payloadBytes=${payload.size}" +
+                        " uploadMs=${(uploadEndNs - httpStartedAt) / 1_000_000}" +
+                        " postUploadWaitMs=${(endNs - uploadEndNs) / 1_000_000}"
+                }
+            }
             val responseBytes = (if (statusCode in 200..299) connection.inputStream else connection.errorStream)
                 ?.use { input -> input.readBytes() }
                 ?: ByteArray(0)
 
             if (statusCode !in 200..299) {
-                val bodyPreview = responseBytes.toString(Charsets.UTF_8).take(256)
-                throw IOException("GLens request failed with HTTP $statusCode: $bodyPreview")
+                throw IOException("GLens request failed with HTTP $statusCode")
             }
 
             responseBytes
         } finally {
+            if (tachiyomi.data.BuildConfig.DEBUG) {
+                val endNs = System.nanoTime()
+                logcat(LogPriority.DEBUG) {
+                    "OCR(glens) http end scan=$scanId tile=$tileTop startNs=$httpStartedAt endNs=$endNs" +
+                        " elapsed=${(endNs - httpStartedAt) / 1_000_000}ms"
+                }
+            }
             connection.disconnect()
         }
     }
@@ -875,7 +1020,7 @@ internal class GlensOcrEngine : OcrEngine {
         private const val TILE_ASPECT_RATIO = 1.8f
         private const val MIN_TILE_HEIGHT = 1000
         private const val TILE_OVERLAP_RATIO = 0.2f
-        private const val TILE_CONCURRENCY = 3
+        private const val TILE_CONCURRENCY = 4
         private const val DUPLICATE_IOU_THRESHOLD = 0.45f
 
         private const val CONNECT_TIMEOUT_MS = 10_000

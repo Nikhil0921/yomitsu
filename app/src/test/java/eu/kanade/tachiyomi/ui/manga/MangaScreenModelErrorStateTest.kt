@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.ocr.OcrScanManager
+import eu.kanade.tachiyomi.data.ocr.OcrScanQueueState
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import io.mockk.coEvery
@@ -187,6 +188,13 @@ class MangaScreenModelErrorStateTest {
         }
         val ocrScanManager = mockk<OcrScanManager> {
             every { cacheEvents } returns MutableStateFlow(mockk(relaxed = true))
+            every { queueState } returns MutableStateFlow(
+                OcrScanQueueState(
+                    entries = emptyList(),
+                    activeProgress = null,
+                    isPaused = false,
+                ),
+            )
         }
 
         return MangaScreenModel(

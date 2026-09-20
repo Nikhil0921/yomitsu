@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import eu.kanade.tachiyomi.data.download.DownloadManager
+import eu.kanade.tachiyomi.data.ocr.OcrScanManager
+import eu.kanade.tachiyomi.data.ocr.OcrScanQueueEntry
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
@@ -25,6 +27,7 @@ class ContinueScreenModel(
     private val getLibraryManga: GetLibraryManga = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val downloadManager: DownloadManager = Injekt.get(),
+    private val ocrScanManager: OcrScanManager = Injekt.get(),
 ) : StateScreenModel<ContinueScreenModel.State>(State()) {
 
     @Immutable
@@ -44,6 +47,7 @@ class ContinueScreenModel(
         val rawItems: List<ContinueItem> = emptyList(),
         val sort: ContinueSort = ContinueSort.LAST_READ,
         val downloadedOnly: Boolean = false,
+        val ocrScanningIds: Set<Long> = emptySet(),
         val isItemDownloaded: (ContinueItem) -> Boolean = { false },
     ) {
         val items: List<ContinueItem>
@@ -67,6 +71,16 @@ class ContinueScreenModel(
                     mutableState.update { it.copy(isLoading = false, rawItems = items) }
                 }
         }
+        screenModelScope.launch {
+            ocrScanManager.queueState
+                .collectLatest { queueState ->
+                    val scanningIds = queueState.entries
+                        .filter { it.state != OcrScanQueueEntry.State.ERROR }
+                        .map(OcrScanQueueEntry::chapterId)
+                        .toSet()
+                    mutableState.update { it.copy(ocrScanningIds = scanningIds) }
+                }
+        }
     }
 
     fun setSort(sort: ContinueSort) {
@@ -75,6 +89,14 @@ class ContinueScreenModel(
 
     fun setDownloadedOnly(enabled: Boolean) {
         mutableState.update { it.copy(downloadedOnly = enabled) }
+    }
+
+    fun scanNextOcr(mangaId: Long) {
+        val item = mutableState.value.rawItems.firstOrNull { it.manga.id == mangaId }
+        val chapter = item?.nextChapter ?: return
+        screenModelScope.launch {
+            ocrScanManager.enqueue(listOf(chapter.id))
+        }
     }
 
     private fun itemDownloaded(item: ContinueItem): Boolean {

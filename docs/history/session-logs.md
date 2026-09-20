@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-09-19 (Sat) — OCR per-page loop resilience + "Scan Next Chapter" FAB (user master prompt)
+
+**Task (user-authorized):** (1) fix per-page OCR loop resilience in `OcrChapterScanner` (one failed/ hung page must not abort the whole chapter), (2) add "Scan Next Chapter" FAB to MangaScreen.
+
+**Deliverables (uncommitted):**
+- `app/src/main/java/eu/kanade/tachiyomi/data/ocr/OcrChapterScanner.kt`: page loop refactored to per-page try/catch — decode failure, scan exception, and `withTimeoutOrNull(pageScanTimeout)` timeout each skip one page and continue the chapter (CancellationException rethrown for job-cancellation semantics). New constructor param `pageScanTimeout: Duration = PAGE_SCAN_TIMEOUT` (companion `PAGE_SCAN_TIMEOUT = 90.seconds`); `DomainModule` 8-arg positional construction unchanged. Progress now counts only successfully scanned pages (`processedPages` counter instead of `index + 1`); skipped pages warn-logged individually + aggregate.
+- `app/src/test/java/eu/kanade/tachiyomi/data/ocr/OcrChapterScannerTest.kt` (new, 3 tests): all-pages-succeed, one-page-exception skipped+continues (coVerify all 3 pages attempted), one-page-timeout skipped+continues (50ms/100ms timeouts vs 5s virtual delay).
+- `MangaScreenModel.kt`: `scanNextUnreadChapter()` (resolves `getNextUnreadChapter()`, enqueues `listOf(next.id)`), `observeOcrQueue()` (collects `ocrScanManager.queueState`, sets new `State.Success.isNextOcrScanning` = next-unread chapter id present in queue with non-ERROR state).
+- `presentation/manga/MangaScreen.kt`: new private `MangaFloatingActionButtons` composable (Row: OCR `FilledIconButton` — DocumentScanner icon / spinner when `isNextOcrScanning`, then existing `SmallExtendedFloatingActionButton`), used by both Small and Large impls; `onScanNextOcrClicked` param threaded through all 3 signatures.
+- `ui/manga/MangaScreen.kt`: wires `onScanNextOcrClicked = screenModel::scanNextUnreadChapter`.
+- `i18n/.../base/strings.xml`: `action_scan_next_chapter_ocr` = "Scan next chapter (OCR)".
+- `MangaScreenModelErrorStateTest.kt`: added `queueState` stub to its OcrScanManager mock (new observer needs it).
+
+**Test gotchas discovered (JUnit+MockK+coroutines-test):**
+- Relaxed-mock `Context` NPEs in `activeNetworkState()`: `androidx.core.content.getSystemService` uses the String overload (`javaName`), so stub BOTH `getSystemService(Class)` and `getSystemService(String)`.
+- Relaxed MockK of generic `Preference<Boolean>` returns a raw Object from `get()` → CCE at use site; stub explicitly.
+- `OcrImage` validates positive width/height → relaxed `Bitmap` mock (0×0) throws; stub `width`/`height`.
+- Mocking a generic suspend function (`WithOcrScanSession.await`) whose block contains nested MockK-stubbed suspends leaks COROUTINE_SUSPENDED to the caller; the fixture instead uses the REAL `WithOcrScanSession` over an object-expression `OcrRepository`.
+
+**Gates (docker vsc-yomihon image, -Xmx4g, both volumes mounted):** spotlessApply + spotlessCheck + `testDebugUnitTest` + `:app:assembleDebug` — BUILD SUCCESSFUL 3m42s. OcrChapterScannerTest 3/3, OcrScanManagerTest 7/7, MangaScreenModelErrorStateTest 4/4, OcrPageSourceResolverTest PASS. No commit.
+
 ## 2026-09-15 (Wed) — Adaptive UI corrective fix batch
 
 **User-directed refinement** of 2026-09-13 adaptive-UI batch (nav sizing controls explicitly SKIPPED per task — pill stays frozen 12/8dp + 80dp metrics; no RenderEffect/backdrop blur added).
@@ -6357,3 +6378,135 @@ Verification (docker `vsc-yomihon-e24e3bd7e46d…`, `-Xmx4g`, both volumes):
 - `:app:assembleDebug` BUILD SUCCESSFUL in 3m32s;
   `app-arm64-v8a-debug.apk` built (95,624,936 bytes).
 - No device work, no install, no commit per task.
+
+## 2026-09-17 — OCR Stage0 diagnostics review gaps (UNCOMMITTED)
+
+- Scope: 4 files only — PrioritizedTaskQueue.kt, OcrRepositoryImpl.kt,
+  GlensOcrEngine.kt, OcrPageSourceResolver.kt.
+- PrioritizedTaskQueue.submit: optional `diagnosticLabel: String? = null`
+  param inserted before trailing `block`; enqueue + start DEBUG logs now
+  include `label=`. Queue behavior/call sites/tests untouched (default null
+  keeps all 5 test call sites compiling unchanged).
+- OcrRepositoryImpl.submitTask: same optional param, passed through to
+  queue.submit. scanWithGlensOnce is the only caller passing a label:
+  `"chapter=$chapterId page=$pageIndex"`, DEBUG-gated at the call site.
+- GlensOcrEngine: newly-introduced timestamps (preparedStart, parseStart,
+  tileStartedAt, postStartedAt, httpStartedAt) now read
+  `if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L` so
+  release computes zero timing. Preexisting recognizePage/recognizeText
+  `startTime` + executeRequest log guards left untouched.
+- OcrPageSourceResolver: repeated acquisition-start field renamed
+  `startNs` → `acquisitionNs` across acquisition/getImageUrl/getImage/
+  decode logs; substage logs (getImageUrl, cache decode, fallback getImage,
+  network getImage, stream decode) now carry explicit startNs/endNs pairs;
+  all newly-introduced timestamps BuildConfig.DEBUG-gated (release = 0).
+  Network/decode branch logic untouched.
+- No comments/abstractions/deps added. No behavior changes. No new tests
+  (OCR paths need device/models; queue label param covered by existing
+  PrioritizedTaskQueueTest via default-null compile).
+- Gates GREEN (docker, -Xmx4g, 2m29s): spotlessCheck +
+  :data:compileDebugKotlin + :app:compileDebugKotlin + :data:testDebugUnitTest.
+  One spotlessApply pass needed (logcat lambda wrapping in resolver).
+- Device verification + baseline capture NOT done — device locked per task.
+
+## 2026-09-17 — Stage0 APK install as update (SM_M066B, user-directed)
+
+- Pre-install signing gate per docs/rules-Android-Signing.md:
+  - Host ~/.android/debug.keystore SHA-256 e486ea51…248968 (keytool) = known-good.
+  - Device app.yomihon.dev base.apk pulled → apksigner SHA-256 e486ea51…248968 = match.
+  - Fresh app-arm64-v8a-debug.apk (Stage0 instrumentation build) → e486ea51…248968 = match.
+  - HOST KEYSTORE = DEVICE APP = NEW APK. Invariant satisfied.
+- `adb -s 192.168.29.98:5555 install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+  → "Performing Streamed Install / Success". NO uninstall, no -d, no wipe, no new key.
+- apksigner path: container /opt/android-sdk/build-tools/35.0.1/apksigner (host lacks build-tools).
+- Issue #7 (debug-keystore stability): this session's evidence supports stable
+  yomihon-android-home volume key; device data preserved.
+
+## 2026-09-18 — Latest debug install as update + startup capture (SM_M066B, user-directed)
+
+- Pre-install signing gate per docs/rules-Android-Signing.md:
+  - Host ~/.android/debug.keystore SHA-256 e486ea51…248968 (keytool) = known-good.
+  - Container /home/vscode/.android/debug.keystore SHA-256 e486ea51…248968 = match (volume stable).
+  - Fresh app-arm64-v8a-debug.apk (built 11:24 host) → apksigner SHA-256 e486ea51…248968 = match.
+  - Device app.yomihon.dev base.apk pulled to /tmp/opencode/dev-base.apk → apksigner SHA-256 e486ea51…248968 = match.
+  - HOST KEYSTORE = DEVICE APP = NEW APK. Invariant satisfied.
+  - Note: device base.apk bytes differ from local APK (prior stage1b install at 15:01 device ≈ 09:32 host; local build 11:24 host newer) — expected, update path correct.
+- `adb -s 192.168.29.98:5555 install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+  → "Performing Streamed Install / Success". NO uninstall, no -d, no wipe, no new key.
+- Post-install: versionName 0.5.4.1-8294, lastUpdateTime 2026-09-18 17:16:53 (device clock).
+- Startup capture STARTED per recent-task pattern (stage1/stage1b read-aloud logs in /tmp/opencode):
+  `adb shell 'nohup logcat -v threadtime > /sdcard/readaloud-startup-20260918.log 2>&1 &'`
+  → pid 2332, file writing (27MB ring-buffer dump at start). No `logcat -c`, no `--pid` pinning, full unfiltered on-device capture.
+- apksigner path: container /opt/android-sdk/build-tools/35.0.1/apksigner (host lacks build-tools; host `find /` for apksigner timed out — use container).
+
+## 2026-09-18 — Read-aloud startup capture analysis (ch7463, SM_M066B)
+
+- Log: /sdcard/readaloud-startup-20260918.log STOPPED (kill 2332; stale pgrep 12584 = dead, file static 66,224,544B to 17:32:47) and pulled to /tmp/opencode/readaloud-startup-20260918.log (63.9MB at pull, 3150 app lines).
+- Stage0 instrumentation VERIFIED live: `label=chapter=7463 page=N` on enqueue/start, `acquisitionNs` + `startNs`/`endNs` substage pairs (resolve ~476–1470ms, openBitmap ~34–46ms, toOcrImage ~5ms), `activeSlots=` occupancy snapshot, `waitMs` per start.
+- Session: TTS start ch7463 page=0 at 17:20:38.008 (prefetch pages 1..3, rate 1.55) → first onStart p0_s0_c0 at 17:20:44.689 = **6.68s start→speech**.
+- Budget: voice-apply (en-gb-x-rjs-local) :38.008→:41.642 = 3.63s (54%); p0 resolve/bitmap :41.672→:42.165 = 0.49s; p0 HIGH queue wait 615ms (enqueued :42.165 at 3/3 full, started :42.780 when p3 finished); p0 GLENS :42.784→:44.230 = 1.45s (preprocess 104ms, http 1329ms); dispatch→onStart 428ms.
+- Prefetch-before-p0 inversion CONFIRMED: p1/p2/p3 on-demand scans started :38.066–:38.102 while p0 scan waited for voice-ready till :41.672; all 3 slots held → p0 HIGH waited. Cost 0.615s only.
+- GLENS http variance (service-side): p1 10902ms, p2 4429ms, p3 2970ms, p0 1334ms. Parse/remap 1–3ms, cache writes 1–8ms. Queue waits otherwise 0–2ms.
+- Health: 0 FATAL on 09-18 (3 FATALs in file all 09-15/09-16 ring-buffer: known SettingsTrackingScreen transition-key crash). Cold MainActivity Displayed +5.4s (16:59), warm +7s (17:19), ReaderActivity +419ms (17:20:26).
+- Implication (evidence only, no change): biggest lever = voice-init 3.6s, then GLENS variance; queue contention minor. No action authorized.
+
+## 2026-09-18 — STAGE 2C-1 split voice-init timing (instrument + cold/warm capture)
+
+- Instrumentation (AndroidTtsEngine.kt only, DEBUG-only, no behavior/order/sync change): `TTS init readiness awaitMs=` around readiness.await(); `TTS voicecfg voicesMs=/enginesMs=/resolveApplyMs=/totalMs=` in applyVoiceConfig. No text/PII (durations + existing name logs only). Stage0/queue instrumentation untouched.
+- Gates: spotlessCheck + :app:compileDebugKotlin BUILD SUCCESSFUL 2m21s; assembleDebug 3m; APK cert e486ea51…248968; install -r Success (17:48:27 device); force-stop → cold guaranteed. Capture /sdcard/tts-voicecfg-20260918.log → /tmp/opencode/tts-voicecfg-20260918.log (65MB), stopped.
+- COLD (ch7877, pid 28840): TTS start :51.621 → Create :51.661 → bound :51.680 → Connected :52.298 → awaitMs=5381 (:57.062) → voice applied :57.367 (voicecfg voices 66 / engines 227 / apply 9 / total 305ms). Start→voice = 5.75s. First speech :26.233 (OCR filled rest).
+- WARM same process: voicecfg 257ms (17:57) / 261ms (17:58), no await line (fast-path).
+- Verdict: 2.78s owner = readiness.await (Google TTS onInit SUCCESS latency; "Connected" ≠ initialized). engine.voices suspicion REFUTED (66ms). Warm reuse 216–261ms proves eager-init mechanically safe to investigate.
+
+## 2026-09-19 — STAGE 4K ship TILE_CONCURRENCY 3→4 (user-authorized, uncommitted)
+
+- Change: `data/src/main/java/mihon/data/ocr/GlensOcrEngine.kt:1023` one line (`3`→`4`). Constant was 3 (verified, not already 4). No test asserts the constant; `data/src/test` grep clean; no test modified. Same file carries prior-stage uncommitted test-only seam hunks (tileTopsFor/recognizePage overloads) — inspected, untouched, preserved.
+- Gates (single container run, vsc image, -Xmx4g, both volumes): `spotlessCheck + testDebugUnitTest + :app:assembleDebug` BUILD SUCCESSFUL 3m48s. No failures (all module test tasks ran: core:common, domain, data, app).
+- Scope: geometry/overlap/IoU/remap/transport/retry/queue/locks/TTS/prefetch/logging untouched. No deps, no signing changes.
+- Device: NO install/verification performed (per task). Git: NO commit/push/reset (working tree preserved).
+
+## 2026-09-19 — STAGE 4L device validation of production TILE_CONCURRENCY=4: PASS
+
+- Tree: uncommitted work preserved (git status inspected first); TILE_CONCURRENCY=4 confirmed intact; no source change in this stage.
+- Gates (container, -Xmx4g, both volumes): spotlessCheck + testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 3m24s.
+- Signing: apksigner SHA-256 e486ea516e88fba9854f4fe166fe0f420f64792fc911fa5381219b8e11248968 matches; `adb install -r` Success (no uninstall/wipe). Force-stop → cold. Capture /sdcard/stage4l-c4-20260919.log → /tmp/opencode/stage4l-c4-20260919.log (51.8MB).
+- Fixture: ch8447 (Reborn Ranker ch1, uncached), user read p0–p13. 16 pages scanned (0–15), tiled path (max 11 tiles/scan, histogram 6–11).
+- Correctness: 160× HTTP status=200, zero non-2xx, zero OCR exceptions from session (3 FATAL lines are stale 09-15/09-16 ring-buffer, known SettingsTrackingScreen crash). Regions 0–19/page, tiled=true; ordering functionally verified (TTS consumed p0_s0→p12_s6 in order).
+- Concurrency live: 11-tile scan ran max 4 concurrent tile spans — production C=4 observed on device.
+- Timing: recognizePage totals 9.4–32.4s across 6–11-tile pages (service variance; not 1:1-compared per interpretation rules; consistent with 4J band).
+- TTS smoke: TTS start ch8447 p0 → 167 speak dispatches p0→p12, 26 advances, user reached p13. No crashes, no OCR/TTS interaction issues.
+- Disposition: PASS. Stage 4K/4L closed as validated. No commit.
+
+## 2026-09-19 — STAGE 4M GLENS transport/service split: SERVICE-DOMINANT
+
+- Method: reused 4E-A upload-split DEBUG logs (uploadEndNs at body-complete, responseCode availability, total); zero code change. Gates re-green (spotlessCheck + testDebugUnitTest + assembleDebug 3m22s). Cert e486ea, install -r, cold, capture /sdcard/stage4m-split-20260919.log → /tmp (43MB).
+- Fixture: ch8475 ch1 (fresh uncached, pid-26841-pure: 5 scans, 29 tile uploads, max 7 tiles/scan, 7.07MB main page).
+- Timing (n=29): upload med 3ms / p90 4884ms / max 5005ms (p90/max = first-batch cold handshakes; steady-state med 3ms ⇒ keep-alive reuse works); post-upload wait med 9598ms / p90 17930ms / max 18319ms. Upload 1.3% vs wait 93.2% of tile time. Page totals 18.6–29.3s.
+- HTTP: 29× status 200, zero non-2xx, zero OCR exceptions. Regions healthy (6–14/page, tiled). TTS smoke: 18 dispatches ch8475 from p0_s0, in order.
+- Classification: SERVICE-DOMINANT — remaining latency is GLENS service-side from the client's observable boundary. Transport optimization closed as low-value (per-page client cost ≈ one handshake). Next investigation belongs to remaining critical-path costs outside transport (e.g., service wait irreducible client-side; voice-init/prefetch per earlier stages). No commit.
+
+## 2026-09-19 — STAGE 4N TTS voice-init forensic audit (read-only)
+
+- Path traced: start→runPlayback→ensureInitialized→initialize [mutex; fast-path applyVoiceConfig-only when built, else Main-thread TextToSpeech construction + readiness.await] → applyVoiceConfig [voices+engines enumerate, resolveVoiceSelection, setVoice/setLanguage, ~300ms] → acquireFocus → acquireSentences → speak (Main dispatch, QUEUE_FLUSH) → onStart callback.
+- Blocking: construction posted to Main (required), await suspends caller coroutine (Main never blocked). Cold init serializes BEFORE OCR acquisition in runPlayback — on first-tap critical path unless eager init already completed.
+- Measured (existing logs, no new capture): cold awaitMs=5381 + voicecfg 305ms (voices 66/engines 227/apply 9); warm reuse 81–261ms; single Create (no dup); eager init 43s pre-tap → 81ms at tap; one anomalous boot awaitMs=28868 (service variance, not client).
+- Hypotheses: A CONFIRMED (Google TTS onInit owns ~94% cold init); B/C refuted; D refuted for construction (re-apply ~250ms/resume only); E refuted; F PROVEN+SHIPPED (2D eager).
+- Actionability: HIDE (done) / ACCEPT (engine await) / REDUCE candidate only: skip redundant voicecfg re-apply on unchanged prefs (~250ms/resume paths; NOT first-speech) — seam specified, authorization required. No experiment justified; branch closed. Zero source changes, no commit.
+
+## 2026-09-19 — STAGE 4O next-task forensic reconciliation
+
+- Scope: read-only audit of docs/implementation-roadmap.md §B, docs/state.md, docs/memory.md, docs/history/session-logs.md. No source, test, device, or build actions.
+- Finding: Roadmap §B lists exactly ONE current authorized task — Q8 Feed auto-pagination (user-authorized 09-16; implementation complete; gates green; device verification PENDING). No other implementation task is authorized.
+- Scope locks confirmed: Q3–Q7 HARD HALTED in state.md. Q8 not in HALTED list (correct — authorized).
+- All OCR TTS stages 0–4N closed via prior sessions. 4O audit itself produced zero code changes.
+- Conclusion: Q8 Feed auto-pagination device verification is the only outstanding item under current authorized task. No ambiguity in authorization status.
+
+## 2026-09-19 — STAGE 4P OCR prefetch/prefetch-load forensic audit
+
+- Scope: read-only audit of reader-open prefetch mechanics. No source, test, device, or build actions.
+- Classification: MIXED (client-scheduling dominant). p0 HIGH queue wait 0.615s observed when TTS prefetch p1/p2/p3 occupy all 3 queue slots simultaneously.
+- Root cause: `maybePrefetchReaderOpenOcr()` triggered at `ReaderViewModel.kt:720` (onPageSelected) — after TTS start, so reader-open prefetch starts too late to hide first-page latency.
+- Prefetch depth=3–4 at rate≥1.5x fills all 3 queue slots; GLENS service wait irreducible client-side.
+- Existing prefetch hides ~14s of ~27s total scan latency for settled reading (ch8222).
+- Smallest experiment: move reader-open prefetch trigger from `onPageSelected()` to `loadNewChapter()` (ReaderViewModel.kt:586). NOT authorized — requires new explicit authorization. Branch closed.
+- Zero source changes, no commit.

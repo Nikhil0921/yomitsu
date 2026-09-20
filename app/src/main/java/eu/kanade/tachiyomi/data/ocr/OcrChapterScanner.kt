@@ -1,10 +1,12 @@
 package eu.kanade.tachiyomi.data.ocr
 
 import android.content.Context
+import android.graphics.Bitmap
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.util.ocr.toOcrImage
 import eu.kanade.tachiyomi.util.system.activeNetworkState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import mihon.domain.ocr.interactor.ClearCachedChapterOcr
 import mihon.domain.ocr.interactor.ScanPageOcr
@@ -13,6 +15,8 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.interactor.GetChapter
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.manga.interactor.GetManga
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 internal class OcrChapterScanner(
     private val context: Context,
@@ -23,6 +27,7 @@ internal class OcrChapterScanner(
     private val scanPageOcr: ScanPageOcr,
     private val pageSourceResolver: OcrPageSourceResolver,
     private val downloadPreferences: DownloadPreferences,
+    private val pageScanTimeout: Duration = PAGE_SCAN_TIMEOUT,
 ) {
     suspend fun scanChapter(
         chapterId: Long,
@@ -92,7 +97,9 @@ internal class OcrChapterScanner(
 
                         try {
                             var chapterHasCachedResults = false
-                            for ((index, page) in pages.pages.withIndex()) {
+                            var skippedPages = 0
+                            var processedPages = 0
+                            for (page in pages.pages) {
                                 val networkError = checkNetworkState()
                                 if (networkError != null) {
                                     clearCachedChapterOcr.await(chapterId)
@@ -109,22 +116,48 @@ internal class OcrChapterScanner(
                                     return@pageScope false
                                 }
 
-                                val bitmap = page.openBitmap() ?: error("Unable to decode page ${page.pageIndex + 1}")
+                                var bitmap: Bitmap? = null
+                                var pageScanned = false
                                 try {
-                                    scanPageOcr.await(chapterId, page.pageIndex, bitmap.toOcrImage())
+                                    bitmap = page.openBitmap()
+                                    if (bitmap == null) {
+                                        logcat(LogPriority.WARN) {
+                                            "Unable to decode page ${page.pageIndex + 1} in chapter $chapterId; skipping"
+                                        }
+                                    } else {
+                                        pageScanned = withTimeoutOrNull(pageScanTimeout) {
+                                            scanPageOcr.await(chapterId, page.pageIndex, bitmap.toOcrImage())
+                                        } != null
+                                    }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    logcat(LogPriority.ERROR, e) {
+                                        "Failed to scan page ${page.pageIndex + 1} in chapter $chapterId; skipping"
+                                    }
                                 } finally {
-                                    if (!bitmap.isRecycled) {
+                                    if (bitmap != null && !bitmap.isRecycled) {
                                         bitmap.recycle()
                                     }
                                 }
 
-                                if (!chapterHasCachedResults) {
-                                    chapterHasCachedResults = true
-                                    onCacheStateChanged(chapterId, true)
+                                if (pageScanned) {
+                                    processedPages++
+                                    if (!chapterHasCachedResults) {
+                                        chapterHasCachedResults = true
+                                        onCacheStateChanged(chapterId, true)
+                                    }
+                                    lastProgress = lastProgress.copy(processedPages = processedPages)
+                                    onProgress(lastProgress)
+                                } else {
+                                    skippedPages++
                                 }
+                            }
 
-                                lastProgress = lastProgress.copy(processedPages = index + 1)
-                                onProgress(lastProgress)
+                            if (skippedPages > 0) {
+                                logcat(LogPriority.WARN) {
+                                    "OCR scan of chapter $chapterId finished with $skippedPages/$totalPages pages skipped"
+                                }
                             }
 
                             onComplete(lastProgress)
@@ -199,6 +232,10 @@ internal class OcrChapterScanner(
         } else {
             context.getString(R.string.download_notifier_no_network)
         }
+    }
+
+    companion object {
+        internal val PAGE_SCAN_TIMEOUT = 90.seconds
     }
 }
 

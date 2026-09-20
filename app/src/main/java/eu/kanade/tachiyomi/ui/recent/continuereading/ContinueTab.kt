@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,8 +108,11 @@ private fun Screen.ContinueContent(contentPadding: PaddingValues) {
                     }
                 } else {
                     items(state.items, key = { it.manga.manga.id }) { item ->
+                        val ocrScanning = item.nextChapter?.id in state.ocrScanningIds
                         ContinueItemRow(
                             item = item.manga,
+                            ocrScanning = ocrScanning,
+                            onScanOcr = { screenModel.scanNextOcr(item.manga.manga.id) },
                             onClickCover = { navigator.push(MangaScreen(item.manga.manga.id)) },
                             onClickResume = {
                                 val chapter = item.nextChapter
@@ -133,6 +139,8 @@ private fun Screen.ContinueContent(contentPadding: PaddingValues) {
 @Composable
 private fun ContinueItemRow(
     item: LibraryManga,
+    ocrScanning: Boolean,
+    onScanOcr: () -> Unit,
     onClickCover: () -> Unit,
     onClickResume: () -> Unit,
 ) {
@@ -170,6 +178,16 @@ private fun ContinueItemRow(
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        IconButton(onClick = onScanOcr, enabled = !ocrScanning) {
+            if (ocrScanning) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.DocumentScanner,
+                    contentDescription = stringResource(MR.strings.action_scan_next_chapter_ocr),
                 )
             }
         }

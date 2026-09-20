@@ -1,0 +1,3 @@
+# Same-page A/B fixture is LOCAL-ONLY (real manga page, must never be committed).
+ab-page*.webp
+ab-page*.png

@@ -33,6 +33,7 @@ import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.ocr.OcrScanManager
+import eu.kanade.tachiyomi.data.ocr.OcrScanQueueEntry
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.source.Source
@@ -212,6 +213,7 @@ class MangaScreenModel(
 
         observeDownloads()
         observeScanCache()
+        observeOcrQueue()
 
         load()
     }
@@ -595,6 +597,25 @@ class MangaScreenModel(
         }
     }
 
+    private fun observeOcrQueue() {
+        screenModelScope.launchIO {
+            ocrScanManager.queueState
+                .flowWithLifecycle(lifecycle)
+                .collectLatest { queueState ->
+                    val pendingIds = queueState.entries
+                        .filter { it.state != OcrScanQueueEntry.State.ERROR }
+                        .map(OcrScanQueueEntry::chapterId)
+                        .toSet()
+                    updateSuccessState { state ->
+                        val nextUnreadId = state.chapters.getNextUnread(state.manga)?.id
+                        state.copy(
+                            isNextOcrScanning = nextUnreadId != null && nextUnreadId in pendingIds,
+                        )
+                    }
+                }
+        }
+    }
+
     private suspend fun List<Chapter>.toChapterListItems(manga: Manga): List<ChapterList.Item> {
         val isLocal = manga.isLocal()
         val cachedChapterIds = getCachedChapterIdsOcr.await(mapNotNull(Chapter::id))
@@ -776,6 +797,14 @@ class MangaScreenModel(
         toggleAllSelection(false)
         screenModelScope.launchIO {
             ocrScanManager.enqueue(chapters.mapNotNull(Chapter::id))
+        }
+    }
+
+    fun scanNextUnreadChapter() {
+        val next = getNextUnreadChapter() ?: return
+        updateSuccessState { it.copy(isNextOcrScanning = true) }
+        screenModelScope.launchIO {
+            ocrScanManager.enqueue(listOf(next.id))
         }
     }
 
@@ -1198,6 +1227,7 @@ class MangaScreenModel(
             val dialog: Dialog? = null,
             val hasPromptedToAddBefore: Boolean = false,
             val hideMissingChapters: Boolean = false,
+            val isNextOcrScanning: Boolean = false,
         ) : State {
             val processedChapters by lazy {
                 chapters.applyFilters(manga).toList()

@@ -195,8 +195,15 @@ class ReaderViewModel @JvmOverloads constructor(
     private val ttsController: TtsPlaybackController
         get() = ttsControllerInstance ?: createTtsController().also { ttsControllerInstance = it }
 
+    /** Stage 2D experiment: single eager TTS engine init job (no focus, no speech). */
+    private var ttsEagerInitJob: Job? = null
+
     /** Debounce job for TTS page-selected during rapid swipes (avoids mass OCR). */
     private var ttsPageSelectedJob: Job? = null
+
+    /** Reader-open OCR prefetch: one opportunistic first-page scan per chapter. */
+    private var readerOpenPrefetchJob: Job? = null
+    private val readerOpenPrefetchGate = ReaderOpenPrefetchGate()
 
     private fun createTtsController(): TtsPlaybackController {
         val controller = TtsPlaybackController(
@@ -392,6 +399,29 @@ class ReaderViewModel @JvmOverloads constructor(
         ttsController.start(context, pageIndex)
     }
 
+    /**
+     * Reader-open OCR prefetch: once per chapter, best-effort NORMAL scan of
+     * the current page so GLENS work overlaps reader dwell time. Later TTS
+     * acquisition joins the in-flight scan or hits the cache. Skipped while a
+     * TTS session is active (its own prefetch already covers these pages).
+     */
+    private fun maybePrefetchReaderOpenOcr(pageIndex: Int) {
+        val instance = ttsControllerInstance
+        if (instance != null) {
+            val phase = instance.state.value.phase
+            if (phase != TtsPhase.Idle && phase != TtsPhase.Finished && phase != TtsPhase.Error) return
+        }
+        val context = buildTtsChapterContext() ?: return
+        if (!readerOpenPrefetchGate.shouldSubmit(context.chapter.id)) return
+        readerOpenPrefetchJob?.cancel()
+        readerOpenPrefetchJob = viewModelScope.launch {
+            // Re-check currency: the chapter may have changed since selection.
+            val current = buildTtsChapterContext()
+            if (current == null || current.chapter.id != context.chapter.id) return@launch
+            ttsController.prefetchReaderOpenPage(current, pageIndex)
+        }
+    }
+
     /** Builds playback context for the currently active chapter, or null while it isn't ready. */
     private fun buildTtsChapterContext(): TtsChapterContext? {
         val manga = manga ?: return null
@@ -476,6 +506,28 @@ class ReaderViewModel @JvmOverloads constructor(
                     // Initialize OCR model early - avoids delay on first text-recognition
                     ocrProcessor
 
+                    // Stage 2D experiment: eager TTS engine init overlaps Google TTS
+                    // service startup with reader preparation. Async, no audio
+                    // focus, no speech; existing idempotent initialize() fast-path
+                    // dedups against later Read-Aloud starts.
+                    if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+                        logcat(LogPriority.DEBUG) { "TTS eagerinit requested" }
+                    }
+                    if (ttsEagerInitJob?.isActive != true) {
+                        ttsEagerInitJob = viewModelScope.launch {
+                            val startNs = if (eu.kanade.tachiyomi.BuildConfig.DEBUG) System.nanoTime() else 0L
+                            if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+                                logcat(LogPriority.DEBUG) { "TTS eagerinit started" }
+                            }
+                            val ok = ttsEngine.initialize()
+                            if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+                                logcat(LogPriority.DEBUG) {
+                                    "TTS eagerinit completed ok=$ok elapsedMs=${(System.nanoTime() - startNs) / 1_000_000}"
+                                }
+                            }
+                        }
+                    }
+
                     Result.success(true)
                 } else {
                     // Unlikely but okay
@@ -530,6 +582,7 @@ class ReaderViewModel @JvmOverloads constructor(
     private fun loadNewChapter(chapter: ReaderChapter) {
         val loader = loader ?: return
 
+        readerOpenPrefetchJob?.cancel()
         viewModelScope.launchIO {
             logcat { "Loading ${chapter.chapter.url}" }
 
@@ -538,6 +591,7 @@ class ReaderViewModel @JvmOverloads constructor(
 
             try {
                 loadChapter(loader, chapter)
+                maybePrefetchReaderOpenOcr(0)
             } catch (e: Throwable) {
                 if (e is CancellationException) {
                     throw e
@@ -664,6 +718,7 @@ class ReaderViewModel @JvmOverloads constructor(
                     }
                 }
             }
+            maybePrefetchReaderOpenOcr(page.index)
         }
 
         val inDownloadRange = page.number.toDouble() / pages.size > 0.25
