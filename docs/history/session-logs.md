@@ -6510,3 +6510,20 @@ Verification (docker `vsc-yomihon-e24e3bd7e46d…`, `-Xmx4g`, both volumes):
 - Existing prefetch hides ~14s of ~27s total scan latency for settled reading (ch8222).
 - Smallest experiment: move reader-open prefetch trigger from `onPageSelected()` to `loadNewChapter()` (ReaderViewModel.kt:586). NOT authorized — requires new explicit authorization. Branch closed.
 - Zero source changes, no commit.
+
+---
+
+## 2026-09-20 — v0.5.4.2 release (user-authorized release task)
+
+User-authorized: publish stable release. Steps executed:
+
+1. Pre-flight: host `~/.android/debug.keystore` SHA-256 = `E4:86:EA:51:6E:88:FB:A9:85:4F:4F:E1:66:FE:0F:42:0F:64:79:2F:C9:11:FA:53:81:21:9B:8E:11:24:89:68` = known-good `e486ea516e88fba9854f4fe166fe0f420f64792fc911fa5381219b8e11248968`. Container (yomihon-android-home volume mounted) same keystore, same fingerprint verified. Signing gate PASSED.
+2. Quality gates (docker -Xmx4g, both volumes): `./gradlew spotlessCheck testDebugUnitTest verifySqlDelightMigration` → BUILD SUCCESSFUL 5m08s (336 tasks, 15 executed / 321 up-to-date). No failures.
+3. Version bump: `app/build.gradle.kts` versionCode 31→32, versionName 0.5.4.1→0.5.4.2. Committed as 20f4eb746 ("release: v0.5.4.2"), tagged v0.5.4.2 (annotated, message "Yomitsu Release v0.5.4.2").
+4. Release build: `./gradlew :app:assembleRelease -Pinclude-telemetry -Penable-updater` → BUILD SUCCESSFUL 19m36s (281 tasks: 75 executed, 8 from cache, 198 up-to-date). Output: 5 ABI APKs under app/build/outputs/apk/release/ (arm64-v8a 63M, armeabi-v7a 57M, universal 123M, x86 56M, x86_64 68M).
+5. Signing verification: `apksigner verify --print-certs` on app-arm64-v8a-release.apk → SHA-256 digest `e486ea516e88fba9854f4fe166fe0f420f64792fc911fa5381219b8e11248968` — matches keystore. PASS.
+6. Push: `git push origin main` (5551eebe4..20f4eb746), `git push origin v0.5.4.2` — both OK.
+7. GitHub release: `gh release create v0.5.4.2 --repo Nikhil0921/yomitsu --title "Yomitsu v0.5.4.2" --notes-file /tmp/release_notes.md app/build/outputs/apk/release/*.apk` → https://github.com/Nikhil0921/yomitsu/releases/tag/v0.5.4.2 (Latest, 5 assets).
+8. Docs updated: state.md (version/release/HEAD block), memory.md (new 09-20 session entry), phase.md (new current-phase pointer).
+
+Note (user instruction 09-20): public release notes deliberately omit upstream-project attribution (AnymeX/Chimahon names not referenced in /tmp/release_notes.md). Internal docs retain historical records unchanged.

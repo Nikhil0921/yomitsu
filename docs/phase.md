@@ -5,7 +5,19 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **YOMUCHU UI BATCH 2 EXECUTED 2026-09-15
+Current phase pointer: **v0.5.4.2 RELEASED 2026-09-20 (user-authorized release task).
+  Version bump 0.5.4.1/vc31 → 0.5.4.2/vc32 committed as 20f4eb746 + tag v0.5.4.2,
+  both pushed to origin (Nikhil0921/yomitsu). All 3 quality gates green in docker
+  (-Xmx4g, both volumes): spotlessCheck + testDebugUnitTest + verifySqlDelightMigration
+  5m08s; `:app:assembleRelease -Pinclude-telemetry -Penable-updater` 19m36s. Signing
+  pre-build gate PASSED (host keystore + container = known-good SHA-256
+  e486ea51...8968; apksigner-verified release APK cert matches). 5 ABI APKs attached
+  to GitHub release (Latest). Content shipped: 09-13/09-15 adaptive-UI + frosted
+  theme batches, 09-15 YOMUCHU batch 2 (Recent collapsible groups + gradient
+  hairline fix), 09-19 OCR per-page resilience + "Scan Next Chapter" FAB + progress
+  sync + Stage 4P prefetch-on-chapter-open + GLENS tile concurrency 4, Feed
+  auto-pagination + compact source headers (user-verified 09-19). Device-session
+  keystore blocker (known-issue #7) unrelated to release path. Prior: YOMUCHU UI BATCH 2 EXECUTED 2026-09-15
   (user-authorized, design-approved): Recent→Updates collapsible per-manga
   grouping (pure fold fn + Group uiModel + TDD 7/7, default collapsed);
   PreferenceGroupCard outlineVariant hairline (gradient-stop wash-out fix,

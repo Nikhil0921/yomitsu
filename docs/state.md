@@ -10,22 +10,16 @@
 
 ```text
 Project:        Yomitsu — Android manga/comic reader, OCR + Read-Aloud TTS, dictionary/language tooling
-Version:        0.5.4.1 / versionCode 31 (app/build.gradle.kts single source of truth)
-Latest release: v0.5.4.1 (tag 2af00b105, published 2026-09-13, GitHub Latest, 5 ABI APKs)
-Branch/HEAD:    main @ 3dbf474ba — 3 commits AHEAD of origin/main, NOT pushed:
-                 3c5858e0e AnymeX UI micro-batch · 45e9b7c55 Frosted theme +
-                 immersive + adaptive-UI batches · 3dbf474ba YOMUCHU batch 2
-                 (Recent collapsible manga groups + gradient hairline fix + Recent pill scroll)
-Working tree:   OCR progress sync + Recent-tab OCR action + FAB tap-responsiveness
-                 (uncommitted): OcrItem equals/hashCode → progress-aware diffing
-                 (unsticks 1/N), ContinueScreenModel injects OcrScanManager +
-                 scanNextOcr + ocrScanningIds, ContinueTab DocumentScanner button,
-                 MangaScreenModel.scanNextUnreadChapter optimistic isNextOcrScanning.
+Version:        0.5.4.2 / versionCode 32 (app/build.gradle.kts single source of truth)
+Latest release: v0.5.4.2 (tag 20f4eb746, published 2026-09-20, GitHub Latest, 5 ABI APKs)
+Branch/HEAD:    main @ 20f4eb746 — PUSHED to origin/main; tag v0.5.4.2 pushed
+Working tree:   clean
 Current phase:  no active implementation phase (all stages 0–4P closed, 4P-impl done)
-Authorized task: OCR progress sync + Recent-tab action + FAB responsiveness
-                 (user master prompt 09-19) — COMPLETE (gates green 09-19).
-Last gates:     2026-09-19 all green: spotlessCheck + testDebugUnitTest +
-                 :app:assembleDebug 4m12s (BUILD SUCCESSFUL 393 tasks).
+Last release:   2026-09-20 v0.5.4.2 released locally (docker -Xmx4g, both volumes):
+                gates green 5m08s (spotless+test+verifySqlDelightMigration),
+                assembleRelease 19m36s, APK cert SHA-256 verified = e486ea51...8968,
+                5 ABI APKs pushed to GitHub (Nikhil0921/yomitsu)
+Last gates:     2026-09-20 all green (see last release line)
 Last device:    2026-09-19 STAGE 4L device PASS (SM_M066B wireless: ch8447 p0–15,
                  160×HTTP200, max 4 concurrent tile spans, TTS smoke OK).
                  Q8 Feed auto-pagination device PASS (user-verified 09-19).
@@ -33,7 +27,7 @@ Last device:    2026-09-19 STAGE 4L device PASS (SM_M066B wireless: ch8447 p0–
 
 ## Current blockers
 
-1. **Debug-keystore signature mismatch** blocks device pass: `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (09-15). CONFLICTING RECORDS (not reconciled — see memory.md issue #7): known-issue #7 says `yomihon-android-home` volume at `/home/vscode/.android` keeps the key stable; YOMUCHU batch 2 found it NOT mounted/regenerated. VERIFY the mount before any device session; never uninstall `app.yomihon.dev` without a current `.tachibk` backup (data loss).
+1. **Debug-keystore signature mismatch** blocks device pass: `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (09-15). CONFLICTING RECORDS (not reconciled — see memory.md issue #7): known-issue #7 says `yomihon-android-home` volume at `/home/vscode/.android` keeps the key stable; YOMUCHU batch 2 found it NOT mounted/regenerated. VERIFY the mount before any device session; never uninstall `app.yomihon.dev` without a current `.tachibk` backup (data loss). Note: 09-20 v0.5.4.2 release built + published with the stable keystore (SHA-256 e486ea51...8968 verified host + container + APK cert) — release path unaffected; device-session blocker remains.
 2. Nothing else hard-blocked. No authorized implementation task. All stages 0–4P closed.
 
 ## Active technical gotchas
