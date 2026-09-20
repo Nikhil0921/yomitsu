@@ -10,6 +10,10 @@
 > (Asura Scans remote source), N+1 p0..p3 all `status=Ready` in `ChapterCache`
 > (disk hits confirmed on subsequent opens), transition into N+1 rendered from
 > cache. Logcat evidence: `.device-pass/prefetch-verify.log`.
+> Detailed runtime statistics + per-session timing table:
+> `docs/audits/next-chapter-prefetch-verification-report.md` (2026-09-21 capture,
+> 266,942-line logcat; N+1 p0–p4 ready 1–20 ms disk; 0 image GETs warm;
+> worker-isolation threads confirmed; OCR waitMs=0 co-located).
 
 ---
 

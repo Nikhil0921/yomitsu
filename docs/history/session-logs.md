@@ -6563,3 +6563,23 @@ Ponytail notes: metered check uses TRANSPORT_CELLULAR (cheap, available on minSd
 Gates: docker vsc-yomihon-e24e3bd7... (-Xmx4g, both volumes): spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 5m46s. Bump gate 2/2 green. No DB change → verifySqlDelightMigration not required (no .sq/.sqm touched). No commit (user decides). Device verify pending: SM_M066B — open remote manga ch N, watch logcat "Next-chapter image prefetch for <url>"; verify N+1 p0..p3 files land in chapter_disk_cache; transition N→N+1 = near-zero image latency.
 
 Build gotcha: spotlessApply removed in-use `androidx.compose.runtime.Immutable` import from ReaderViewModel (false-positive noUnusedImports) + dropped my unused `toConnectivityManager` import — both restored/reworked manually; final tree spotless-clean.
+
+## 2026-09-21 — Prefetch pipeline detailed logcat capture + verification report (docs-only)
+
+User: "start capture log from adb device to verify statistic data for Next-chapter image prefetch session in detail" → then "give the detailed report".
+
+Execution:
+- Fresh full logcat capture (threadtime, background nohup) on SM_M066B wireless; 3× reopen of Villain To Kill ch10 (Asura Scans remote, Wi-Fi; dumpsys confirmed WiFi active, cellular empty).
+- 3 prefetch firings logged (00:46:42 / 01:01:49 / 01:05:02), each followed by "Loading pages for Chapter 11" + "Prefetching 4 pages of Chapter 11".
+- Timing extracted from internalLoadPage end elapsedNs:
+  - ch11 (N+1, ch4434) p0–p4: session1 4/4/2/2/2 ms, session2 1/1/9/20/1 ms, session3 8/7/4/5/3 ms — ALL ≤20 ms = DiskLruCache read path (isImageInCache=true short-circuit in HttpPageLoader.internalLoadPage).
+  - ch10 (active, ch4435) p0: 4 ms (warm); p6: 2605 ms (first uncached live-scroll page, full network + disk write).
+- Network: ZERO ch11 image GETs in any prefetch window; only 1 cold page-list fetch (302→302→200, ~334 ms total) in session 1; sessions 2–3 page-list also cache-warm.
+- Thread isolation: N and N+1 loaders on distinct TIDs (ch10: 3051/3084/14691; ch11: 3077/6315/11865); interleaved, no blocking/preemption; active-chapter network load (p6) completed normally alongside prefetch.
+- OCR: session 2 co-located ch10 p0 NORMAL GLENS scan: PrioritizedTaskQueue waitMs=0 (queue idle), service round-trip ~11.7 s (GLENS service latency, not app-side); prefetch submitted ZERO OCR tasks (by design).
+- TTS: idle in window, no events.
+- No FATALs / no reader error-path logcat in window.
+
+Deliverable: docs/audits/next-chapter-prefetch-verification-report.md (new; §1–§10: objective, firings, per-session timing tables, thread isolation, network traffic, OCR/TTS coexistence, transition cost N→N+1 warm vs cold, guard verification table, verdict matrix, artifacts). Cross-ref added to audit doc STATUS banner. memory.md session entry added.
+
+Raw capture: .device-pass/prefetch-detail-capture.log (37.6 MB, 266,942 lines, gitignored) + /tmp/pv-detail.log. Docs-only: zero source changes, no build gates required. Prior log .device-pass/prefetch-verify.log kept as first-verify evidence.

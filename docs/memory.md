@@ -8,6 +8,10 @@
 
 ## Recent sessions (most recent first)
 
+### 2026-09-21 — Prefetch pipeline detailed logcat capture + verification report
+
+Started full logcat capture (threadtime, ~36 MB / 266,942 lines) on SM_M066B, opened Villain To Kill ch10 (Asura Scans, remote, Wi-Fi) 3×. Captured 3 prefetch firings (00:46/01:01/01:05). N+1 (ch4434) p0–p4 `internalLoadPage` all Ready in **1–20 ms = DiskLruCache reads, ZERO image GETs in prefetch windows** (bytes cached from 09-20 verify session). Only network cost: 1 cold page-list fetch (302+302+200, ~334 ms). Active ch10 p6 uncached page took 2605 ms network while prefetch ran on separate worker thread — no starvation. OCR co-located scan waitMs=0. Worker isolation confirmed by distinct TIDs (ch10: 3051/3084/14691, ch11: 3077/6315/11865). Cellular guard still code-reviewed only. Full report: docs/audits/next-chapter-prefetch-verification-report.md; raw log .device-pass/prefetch-detail-capture.log (gitignored). Docs-only session; no source changes; no gates needed.
+
 ### 2026-09-20 — Phase 2/3 implementation + device verification: next-chapter image prefetch pipeline (COMMITTED 17773e92c, not pushed)
 
 Implemented per Phase 1 audit (docs/audits/reader-prefetch-phase1-audit.md §4). **DEVICE VERIFIED 2026-09-20 (SM_M066B, .device-pass/prefetch-verify.log):** 3× `Next-chapter image prefetch` logcat firings across 3 reader opens on remote source (Asura Scans: A Dragonslayer ch3→ch4, Villain To Kill ch8→ch9, + 1 reader-open via uuid URL); N+1 p0..p3 all `internalLoadPage ... status=Ready` in N+1's own HttpPageLoader worker (isolated from N's worker); fresh force-stopped process re-fired prefetch correctly; disk-cache hits confirmed on reopen. Guard observed live: prefetch ran under active Wi-Fi (dumpsys: WiFi active 118, Cellular empty). **Cellular short-circuit NOT exercised live** (can't force network-class on unlocked device; `cmd wifi stop-network` unavailable) — code path reviewed, ponytail note on TRANSPORT_CELLULAR ceiling recorded in session log.
