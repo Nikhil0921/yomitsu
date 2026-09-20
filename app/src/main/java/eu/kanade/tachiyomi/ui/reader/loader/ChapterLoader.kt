@@ -73,6 +73,26 @@ class ChapterLoader(
     }
 
     /**
+     * Preloads the first [pageCount] images of a chapter that has been loaded
+     * already, so the transition into it doesn't wait on the network. For
+     * remote chapters the pages are enqueued on that chapter's own page
+     * loader (isolated from the active chapter's queue) at adjacent priority;
+     * for local/downloaded chapters this is a no-op since the images are
+     * already on disk.
+     */
+    suspend fun prefetchFirstPages(chapter: ReaderChapter, pageCount: Int = 4) {
+        if (!chapterIsReady(chapter)) return
+
+        val pages = chapter.pages ?: return
+        if (chapter.pageLoader?.isLocal == true) return
+
+        logcat { "Prefetching ${minOf(pageCount, pages.size)} pages of ${chapter.chapter.name}" }
+        pages.take(pageCount).forEach { page ->
+            chapter.pageLoader?.loadPage(page)
+        }
+    }
+
+    /**
      * Returns the page loader to use for this [chapter].
      */
     private fun getPageLoader(chapter: ReaderChapter): PageLoader {

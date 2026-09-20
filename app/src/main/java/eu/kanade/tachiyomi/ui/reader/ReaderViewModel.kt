@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.annotation.IntRange
 import androidx.compose.runtime.Immutable
@@ -49,6 +50,7 @@ import eu.kanade.tachiyomi.util.lang.byteSize
 import eu.kanade.tachiyomi.util.lang.takeBytes
 import eu.kanade.tachiyomi.util.ocr.toOcrImage
 import eu.kanade.tachiyomi.util.storage.DiskUtil
+import eu.kanade.tachiyomi.util.system.connectivityManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -205,6 +207,10 @@ class ReaderViewModel @JvmOverloads constructor(
     private var readerOpenPrefetchJob: Job? = null
     private val readerOpenPrefetchGate = ReaderOpenPrefetchGate()
 
+    /** Next-chapter image prefetch: one shot per next-chapter id per session. */
+    private var nextChapterPrefetchJob: Job? = null
+    private val nextChapterPrefetchGate = NextChapterPrefetchGate()
+
     private fun createTtsController(): TtsPlaybackController {
         val controller = TtsPlaybackController(
             scope = viewModelScope,
@@ -352,6 +358,7 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     override fun onCleared() {
+        nextChapterPrefetchJob?.cancel()
         ttsControllerInstance?.let { controller ->
             controller.stop()
             ttsEngine.shutdown()
@@ -572,7 +579,44 @@ class ReaderViewModel @JvmOverloads constructor(
                 )
             }
         }
+        maybePrefetchNextChapter(newChapters, chapter)
         return newChapters
+    }
+
+    /**
+     * After the active chapter finishes loading, warm the first few images of the
+     * next chapter in the background so crossing the boundary doesn't stall on
+     * the network. Best-effort: remote sources only, skipped on metered
+     * connections and when the toggle is off. The download runs on the next
+     * chapter's own page loader, isolated from the active chapter's queue.
+     */
+    private fun maybePrefetchNextChapter(chapters: ViewerChapters, chapter: ReaderChapter) {
+        val next = chapters.nextChapter ?: return
+        if (!readerPreferences.prefetchNextChapter.get()) return
+
+        if (sourceManager.getOrStub(manga?.source ?: return) !is HttpSource) return
+
+        val cm = application.connectivityManager
+        val activeNetwork = cm.activeNetwork
+        val capabilities = activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) return
+        val activeId = chapter.chapter.id ?: return
+        if (!nextChapterPrefetchGate.shouldSubmit(activeId)) return
+
+        nextChapterPrefetchJob?.cancel()
+        nextChapterPrefetchJob = viewModelScope.launchIO {
+            val loader = loader ?: return@launchIO
+            logcat { "Next-chapter image prefetch for ${next.chapter.url}" }
+            try {
+                loader.loadChapter(next)
+                loader.prefetchFirstPages(next)
+            } catch (e: Throwable) {
+                if (e is CancellationException) {
+                    throw e
+                }
+                logcat(LogPriority.DEBUG) { "Next-chapter prefetch failed: ${e.message}" }
+            }
+        }
     }
 
     /**
@@ -583,6 +627,7 @@ class ReaderViewModel @JvmOverloads constructor(
         val loader = loader ?: return
 
         readerOpenPrefetchJob?.cancel()
+        nextChapterPrefetchJob?.cancel()
         viewModelScope.launchIO {
             logcat { "Loading ${chapter.chapter.url}" }
 

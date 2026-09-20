@@ -187,6 +187,11 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_skip_dupe_chapters),
                 ),
                 Preference.PreferenceItem.SwitchPreference(
+                    preference = readerPreferences.prefetchNextChapter,
+                    title = stringResource(MR.strings.pref_prefetch_next_chapter),
+                    subtitle = stringResource(MR.strings.pref_prefetch_next_chapter_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
                     preference = readerPreferences.alwaysShowChapterTransition,
                     title = stringResource(MR.strings.pref_always_show_chapter_transition),
                 ),

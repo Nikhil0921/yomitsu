@@ -12,8 +12,11 @@
 Project:        Yomitsu — Android manga/comic reader, OCR + Read-Aloud TTS, dictionary/language tooling
 Version:        0.5.4.2 / versionCode 32 (app/build.gradle.kts single source of truth)
 Latest release: v0.5.4.2 (tag 20f4eb746, published 2026-09-20, GitHub Latest, 5 ABI APKs)
-Branch/HEAD:    main @ 20f4eb746 — PUSHED to origin/main; tag v0.5.4.2 pushed
-Working tree:   clean
+Branch/HEAD:    main @ 318450ca6 — tree: next-chapter image prefetch pipeline UNCOMMITTED
+                (ReaderViewModel/ChapterLoader/ReaderPreferences/SettingsReaderScreen/
+                NextChapterPrefetchGate + 2 i18n strings + 2 unit tests; gates green 09-20,
+                device verify PENDING)
+Working tree:   prefetch-pipeline files modified + docs delta
 Current phase:  no active implementation phase (all stages 0–4P closed, 4P-impl done)
 Last release:   2026-09-20 v0.5.4.2 released locally (docker -Xmx4g, both volumes):
                 gates green 5m08s (spotless+test+verifySqlDelightMigration),

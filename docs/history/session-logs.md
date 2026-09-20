@@ -6527,3 +6527,39 @@ User-authorized: publish stable release. Steps executed:
 8. Docs updated: state.md (version/release/HEAD block), memory.md (new 09-20 session entry), phase.md (new current-phase pointer).
 
 Note (user instruction 09-20): public release notes deliberately omit upstream-project attribution (AnymeX/Chimahon names not referenced in /tmp/release_notes.md). Internal docs retain historical records unchanged.
+
+---
+
+## 2026-09-20 — Phase 1 read-only audit: reader architecture, page-loading & queue isolation (for next-chapter prefetch pipeline)
+
+Task: user task prompt "Phase 1 — Reader Architecture & Queue Audit" (read-only mandate; no source changes). Produced docs/audits/reader-prefetch-phase1-audit.md.
+
+Findings (evidence basis):
+- Chapter open: init→loadChapter→ChapterLoader.loadChapter (pick loader per source; HttpPageLoader for remote). getPages = ChapterCache page-list JSON first, else source.getPageList HTTP. Images load lazily per-page via viewer → HttpPageLoader.loadPage → its own PriorityBlockingQueue (RETRY=2/DEFAULT=1/ADJACENT=0) drained by ONE worker coroutine per chapter instance; preloadNextPages(current,4) enqueues ADJACENT entries automatically.
+- Adjacent chapters: ViewerChapters built in loadChapter (:556). Preload trigger = viewer transition holders → ReaderActivity.requestPreloadChapter (:1517) → viewModel.preload → loader.loadChapter(N+1) = page-list-only.
+- 10–30s transition latency = serial uncached page-list + p0 image HTTP on transition + GLENS p0 service round-trip (Stage 4M: post-upload wait med 9.6s / p90 17.9s; first-page 15-30s). Stage 4P already removed ~0.615s p0 HIGH queue wait (prefetch trigger moved to loadNewChapter:594).
+- Queues: PrioritizedTaskQueue (data, OCR) = HIGH/NORMAL only, cap 3 (PrioritizedTaskQueue.kt:14,17-20). TTS current page = HIGH; TTS prefetch + reader-open OCR prefetch + OcrChapterScanner = NORMAL. TTS prefetch depth rate-aware 2-3 (TtsPlaybackController.kt:784-791) → can fill all 3 slots. No LOW/background tier; add = ~15 lines (deferred — no N+1 OCR prefetch Phase 1).
+- N vs N+1 image loads: SEPARATE loader instances → structurally isolated in-thread; contention only at shared OkHttp per-host pool + DiskLruCache.
+- ChapterCache = DiskLruCache, 100 MiB cap (ChapterCache.kt:33-38,213), per-image flush() (:160). N+1 prefetch (≤4 images, ~0.5-6MB) evicts few oldest N entries — safe, re-fetchable. OCR cache (OcrCacheDatabase) untouched by Phase 1.
+- Proposed hooks (report §4): ReaderViewModel — trigger at loadChapter success (nextChapter != null, remote, non-metered, one-shot gate ReaderOpenPrefetchGate-pattern, job+id fields beside readerOpenPrefetchJob:416); cancel in loadNewChapter (:585) + onCleared (:354); loadAdjacent/TTS-advance covered uniformly by trigger location. ChapterLoader.prefetchFirstPages(chapter,4) ~5 lines reusing loadPage. No PageLoader API change; TTS controller untouched; no deps/i18n/DB.
+- Network bounds: max 1 chapter ahead, ≤4 images, metered-network skip, skip local/downloaded sources.
+
+Docs protocol: memory.md delta added; no roadmap/state change (read-only audit, no implementation task authorized); no gates run (zero source files touched).
+
+## 2026-09-20 — Phase 2/3 implementation: next-chapter image prefetch pipeline
+
+User task: implement Next-Chapter Image Prefetch per Phase 1 audit (docs/audits/reader-prefetch-phase1-audit.md). Deliverable = background fetch of N+1 p0..p3 into ChapterCache after N loads; must not starve N's page loads / OCR / TTS. TtsPlaybackController untouched (explicit constraint).
+
+Implementation (8 files):
+- i18n base strings: +pref_prefetch_next_chapter ("Prefetch next chapter") + _summary ("Download first pages of the next chapter while reading").
+- ReaderPreferences: prefetchNextChapter = getBoolean("reader_prefetch_next_chapter", true).
+- SettingsReaderScreen getReadingGroup: SwitchPreference (toggle, subtitle).
+- NextChapterPrefetchGate (new file, mirrors ReaderOpenPrefetchGate): one-shot per ACTIVE chapter id; shouldSubmit(activeId) = set-add semantics; re-arms when active chapter changes. NextChapterPrefetchGateTest: 2 tests green.
+- ChapterLoader.prefetchFirstPages(chapter, pageCount=4): return unless chapterIsReady; return if pageLoader.isLocal; else loadPage(first N pages). Remote path enqueues p0 DEFAULT + p1..p3 ADJACENT in N+1's OWN PriorityBlockingQueue (worker isolated from N); Download/Archive/Epub no-op via isLocal guard.
+- ReaderViewModel: fields nextChapterPrefetchJob + nextChapterPrefetchGate (beside readerOpenPrefetchJob, ~:205). Trigger maybePrefetchNextChapter(newChapters, chapter) at loadChapter success (~:582): guards = pref on, nextChapter != null, source is HttpSource, not cellular (TRANSPORT_CELLULAR), gate( activeId ). Job launchIO: loader.loadChapter(next) + loader.prefetchFirstPages(next); CancellationException rethrown, other failures logcat DEBUG only. Cancel in loadNewChapter (~:634) and onCleared (~:355).
+
+Ponytail notes: metered check uses TRANSPORT_CELLULAR (cheap, available on minSdk) rather than NET_CAPABILITY_METERED — cellular is the data-cost case; wifi APN metering edge case skipped (deliberate ceiling: upgrade to hasCapability(NET_CAPABILITY_METERED) API21+ if user reports wifi-metering waste). One chapter ahead, 4 pages (task bound). No OCR prefetch, no new queue tiers (audit §2.2.3 verdict).
+
+Gates: docker vsc-yomihon-e24e3bd7... (-Xmx4g, both volumes): spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 5m46s. Bump gate 2/2 green. No DB change → verifySqlDelightMigration not required (no .sq/.sqm touched). No commit (user decides). Device verify pending: SM_M066B — open remote manga ch N, watch logcat "Next-chapter image prefetch for <url>"; verify N+1 p0..p3 files land in chapter_disk_cache; transition N→N+1 = near-zero image latency.
+
+Build gotcha: spotlessApply removed in-use `androidx.compose.runtime.Immutable` import from ReaderViewModel (false-positive noUnusedImports) + dropped my unused `toConnectivityManager` import — both restored/reworked manually; final tree spotless-clean.
