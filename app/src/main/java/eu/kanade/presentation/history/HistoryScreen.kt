@@ -29,6 +29,7 @@ import eu.kanade.presentation.history.components.HistoryItem
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.animateItemFastScroll
 import eu.kanade.tachiyomi.ui.history.HistoryScreenModel
+import eu.kanade.tachiyomi.ui.recent.RecentCategoryFilterRow
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
@@ -56,6 +57,9 @@ fun HistoryScreen(
             Column {
                 // Page-level controls; the Recent host provides the screen
                 // title. Stays reachable even when the list is empty.
+                if (state.categoryFilterEnabled) {
+                    RecentCategoryFilterRow(isUpdatesPage = false)
+                }
                 HistoryControls(
                     searchQuery = state.searchQuery,
                     onSearchQueryChange = onSearchQueryChange,

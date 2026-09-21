@@ -39,6 +39,10 @@
     <string name="label_default">Default</string>
     <string name="label_warning">Warning</string>
     <string name="label_auto">Auto</string>
+    <string name="label_all_categories">All</string>
+    <string name="category_filter">Category</string>
+    <string name="link_not_configured">This feature/link is currently not configured by the developer.</string>
+    <string name="release_notes_unavailable">Release notes are currently unavailable.</string>
 
     <!-- Shared labels -->
     <string name="label_started">Started</string>
@@ -1317,6 +1321,8 @@
     <string name="supportUsScreen.currentlySupportedBy">Mihon is currently backed by %d+ patrons. We want to thank each and everyone of you. Let's make Mihon even better together.</string>
     <string name="supportUsScreen.contactForDetailsMessage">For alternative options or any related questions, join our Discord server.</string>
     <string name="supportUsScreen.contactPlatform">Discord</string>
+    <string name="supportUsScreen.githubProfile">Find the project on GitHub — stars and issues help the most.</string>
+    <string name="supportUsScreen.githubProfileTitle">GitHub (project &amp; profile)</string>
 
     <string name="donationCampaign.title">Enjoying the app?</string>
     <string name="donationCampaign.paragraph1">Hi! I’m the main developer behind Mihon, and I’d like to ask you to consider supporting its development financially. With enough support, I’ll be able to work on Mihon full-time and focus on long-standing issues as well as highly requested features.</string>

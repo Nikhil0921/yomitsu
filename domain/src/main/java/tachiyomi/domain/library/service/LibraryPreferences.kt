@@ -144,6 +144,30 @@ class LibraryPreferences(
 
     // endregion
 
+    // region Recent category filter
+
+    val displayRecentUpdatesCategoryFilter: Preference<Boolean> = preferenceStore.getBoolean(
+        "display_recent_updates_category_filter",
+        true,
+    )
+
+    val recentUpdatesCategoryId: Preference<Int> = preferenceStore.getInt(
+        "recent_updates_category_id",
+        0,
+    )
+
+    val displayRecentHistoryCategoryFilter: Preference<Boolean> = preferenceStore.getBoolean(
+        "display_recent_history_category_filter",
+        true,
+    )
+
+    val recentHistoryCategoryId: Preference<Int> = preferenceStore.getInt(
+        "recent_history_category_id",
+        0,
+    )
+
+    // endregion
+
     // region Chapter
 
     val filterChapterByRead: Preference<Long> = preferenceStore.getLong(

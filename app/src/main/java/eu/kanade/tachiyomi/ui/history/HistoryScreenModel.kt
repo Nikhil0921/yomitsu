@@ -13,9 +13,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
@@ -62,7 +64,7 @@ class HistoryScreenModel(
     val events: Flow<Event> = _events.receiveAsFlow()
 
     init {
-        screenModelScope.launch {
+        screenModelScope.launchIO {
             state.map { it.searchQuery }
                 .distinctUntilChanged()
                 .flatMapLatest { query ->
@@ -73,9 +75,62 @@ class HistoryScreenModel(
                             _events.send(Event.InternalError)
                         }
                         .map { it.toHistoryUiModels() }
-                        .flowOn(Dispatchers.IO)
                 }
                 .collect { newList -> mutableState.update { it.copy(list = newList) } }
+        }
+
+        screenModelScope.launchIO {
+            combine(
+                libraryPreferences.displayRecentHistoryCategoryFilter.changes(),
+                libraryPreferences.recentHistoryCategoryId.changes(),
+            ) { enabled, categoryId ->
+                Pair(enabled, categoryId)
+            }
+                .distinctUntilChanged()
+                .collect { (enabled, categoryId) ->
+                    if (enabled && categoryId != 0) {
+                        val mangaIds = state.value.list.orEmpty()
+                            .filterIsInstance<HistoryUiModel.Item>()
+                            .map { it.item.mangaId }
+                            .toSet()
+                        primeCategoryCache(mangaIds, categoryId)
+                    } else {
+                        mangaCategoryCache = emptyMap()
+                    }
+                    mutableState.update { state ->
+                        val filtered = if (enabled && categoryId != 0) {
+                            filterHistoryByCategory(state.list.orEmpty(), categoryId)
+                        } else {
+                            state.list.orEmpty()
+                        }
+                        state.copy(
+                            categoryFilterEnabled = enabled,
+                            categoryFilterId = categoryId,
+                            list = filtered.ifEmpty { null },
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun filterHistoryByCategory(
+        models: List<HistoryUiModel>,
+        categoryId: Int,
+    ): List<HistoryUiModel> {
+        // ponytail: non-suspend variant reads the manga→category cache primed
+        // by primeCategoryCache on each filter change; keeps the collect
+        // lambda non-suspending.
+        return models.filter { model ->
+            model is HistoryUiModel.Header ||
+                (model is HistoryUiModel.Item && mangaCategoryCache[model.item.mangaId] == true)
+        }
+    }
+
+    private var mangaCategoryCache: Map<Long, Boolean> = emptyMap()
+
+    private suspend fun primeCategoryCache(mangaIds: Set<Long>, categoryId: Int) {
+        mangaCategoryCache = mangaIds.associateWith { mangaId ->
+            getCategories.await(mangaId).any { it.id == categoryId.toLong() }
         }
     }
 
@@ -240,6 +295,8 @@ class HistoryScreenModel(
         val searchQuery: String? = null,
         val list: List<HistoryUiModel>? = null,
         val dialog: Dialog? = null,
+        val categoryFilterEnabled: Boolean = false,
+        val categoryFilterId: Int = 0,
     )
 
     sealed interface Dialog {
