@@ -6583,3 +6583,54 @@ Execution:
 Deliverable: docs/audits/next-chapter-prefetch-verification-report.md (new; §1–§10: objective, firings, per-session timing tables, thread isolation, network traffic, OCR/TTS coexistence, transition cost N→N+1 warm vs cold, guard verification table, verdict matrix, artifacts). Cross-ref added to audit doc STATUS banner. memory.md session entry added.
 
 Raw capture: .device-pass/prefetch-detail-capture.log (37.6 MB, 266,942 lines, gitignored) + /tmp/pv-detail.log. Docs-only: zero source changes, no build gates required. Prior log .device-pass/prefetch-verify.log kept as first-verify evidence.
+
+## 2026-09-21 — Phase 1 read-only audit: Yomitsu UI Refinement & Feature Audit (4 modules)
+
+User task: "Phase 1 — Yomitsu UI Refinement & Feature Audit" (read-only mandate; no app source/build files modified). Produce docs/audits/yomitsu-ui-refinement-phase1-audit.md covering 4 modules: (1) Library list-item redesign, (2) Recent-tab category toggle, (3) More & About intent handling, (4) in-app changelog / update-checker.
+
+Findings (all source-verified this session):
+- M1: `LibraryDisplayMode.List` → `LibraryPager.kt:81-93` → `LibraryList.kt` → `MangaListItem` (`CommonMangaItem.kt:327-372`, 56dp min height, Square cover 2:1... actually Square ratio 1:1 via `MangaCover.Square`). Reference metrics: `HistoryItem.kt` (96dp Book cover) + `UpdatesUiItem.kt:293-368` (`UpdatesCompactCardHeader`, 52dp Book cover, `shapes.large` Card, `titleSmall`/`bodySmall` metadata, `DotSeparatorText`). Plan: NEW sibling composable `LibraryListItem` (new file `app/.../library/components/LibraryListItem.kt`) adopting the Updates card-header language; swap `MangaListItem` → `LibraryListItem` inside `LibraryList.kt:46` only; `MangaListItem` itself untouched (shared with browse). No 5th `LibraryDisplayMode` value (YAGNI — existing `List` mode IS the compact list mode; restyle body, not enum).
+- M2: `RecentTab.kt` = hard-coded 3 pages (continue/history/updates), `PrimaryTabRow` + `HorizontalPager`, `RecentTabContent` = plain data class, no prefs. Frozen IA (durable decision #10) → toggle must be WITHIN-page, not a new top-level tab. Proposed: extend `LibraryPreferences` with `display_recent_updates_category_filter`/`recent_updates_category_id` (+history equivalents, `Boolean`/`Int`, no DB change) mirroring `categoryTabs`/`categoryNumberOfItems` precedent; wire via `UpdatesScreenModel`/`HistoryScreenModel` + `FeedFilterBar`-style chip row (`FeedScreen.kt` 09-13/09-16 precedent).
+- M3: `MoreScreen.kt` rows = pure `navigator.push`/`uriHandler.openUri`, NO `SnackbarHostState` in `MoreScreen.kt`/`MoreTab.kt`/`AboutScreen.kt` (verified full reads). Support rows (`SupportUsScreen.kt`) = `Card { TextPreferenceWidget }` → `uriHandler.openUri(Constants.URL_DONATE_PATREON/OPENCOLLECTIVE/DISCORD)`. `AboutScreen.kt` = version-row clipboard copy, `checkVersion()` toast dispatch (line 217-243), "What's new" row = plain `uriHandler.openUri(RELEASE_URL)` browser link (line 148-152), footer `LinkIcon` row (Website/Discord/GitHub; X/Facebook/Reddit commented out).
+- M4: full data path verified — `ReleaseServiceImpl.latest()` GET `api.github.com/.../releases/latest` → `GithubRelease` (tag_name/body/html_url/assets) → `ReleaseServiceImpl:28-35` strips after last `<!-->` → `Release.info` markdown → rendered by `MarkdownRender(GFMFlavourDescriptor)` in `NewUpdateScreen` (full screen, `InfoScreen`-based). `GetApplicationRelease` = 3-day throttle (`last_app_check` pref) + semver/commit-count compare. `AppUpdateChecker` = `GITHUB_REPO="Nikhil0921/yomitsu"`, `RELEASE_TAG`/`RELEASE_URL`. `AppUpdateNotifier.promptUpdate` = notification with "Download" + "What's new" (browser `ACTION_VIEW`) actions. Plan: NEW `WhatsNewSheet` composable over EXISTING `AdaptiveSheet` (`presentation-core`, tablet-centered / phone-anchored-draggable) + EXISTING `MarkdownRender` + EXISTING `Release.info` — no new network/parsing/deps. 2 wiring points: `AboutScreen.kt:148-152` row swap (needs dedicated `fetchLatestRelease()` helper bypassing `checkForUpdate`'s `AppUpdateNotifier.promptUpdate` side-effect); notification action = documented limitation, keep browser link. `getDownloadLink` matches only 3 of 5 ABIs (foss/arm64-v8a/x86_64; v7a/x86/universal → `?: map[null]` universal fallback) — flagged latent gap, out of scope.
+
+Gotchas recorded in report §5: new-file-vs-append choice for `LibraryListItem`; `MangaListItem` shared with browse screens; `RecentTabContent` has no pref wiring (extend screen models, not `RecentTab`); 3-tab recent structure is frozen IA; `<!-->` release-notes sentinel not CI-enforced (`WhatsNewSheet` should reuse `ui/more/NewUpdateScreen.kt:24-26` regex strip, not trust the sentinel alone).
+
+Docs protocol: memory.md delta added; state.md unchanged (no new blocker/HEAD/version change); no roadmap/phase change (read-only audit, no implementation task authorized); no build gates run (zero source files touched).
+
+## 2026-09-21 — Phase 2 implementation: Yomitsu UI refinement & bug fixes (4 modules)
+
+User task: execute Phase 1 audit (docs/audits/yomitsu-ui-refinement-phase1-audit.md) as code: 4 modules, M3 + M4 + ABI fix + i18n. Read-only mandate lifted for this session.
+
+Changes (15 modified + 3 new source files + 1 i18n + docs):
+
+M1 Library compact list item:
+- NEW app/src/main/java/eu/kanade/tachiyomi/ui/library/component/LibraryListItem.kt: M3 Card (shapes.large) + 52dp MangaCover.Book + titleSmall title + badge row (Unread/Downloads/Language, DotSeparatorText separators) + trailing ContinueReadingButton (16dp).
+- LibraryList.kt: MangaListItem → LibraryListItem swap inside FastScrollLazyColumn items{}; GlobalSearchItem row unchanged; click/long-click/continue-reading callbacks passed through identically.
+- CommonMangaItem.kt: ContinueReadingButton private → internal (only visibility change; MangaListItem itself untouched, browse-shared).
+- No 5th LibraryDisplayMode value (YAGNI — per audit §1.4).
+
+M2 Recent-tab category filter:
+- LibraryPreferences: +displayRecentUpdatesCategoryFilter (default true) + recentUpdatesCategoryId (0) + displayRecentHistoryCategoryFilter (true) + recentHistoryCategoryId (0).
+- NEW app/src/main/java/eu/kanade/tachiyomi/ui/recent/RecentCategoryFilterRow.kt: FilterChip row ("All" + user categories) reading/writing the two Int prefs; per-page isUpdatesPage flag picks which pair.
+- UpdatesScreenModel: +getCategories injection; init block combines the 2 new prefs (launchIO) → state.categoryFilterEnabled/categoryFilterId/categoryFilteredMangaIds; getUiModel() filters Items by membership (Headers pass through). Cache: mangaInCategory memoized per mangaId+categoryId.
+- HistoryScreenModel: same 2-pref collect in a separate launchIO; non-suspending filterHistoryByCategory reading mangaCategoryCache primed synchronously by primeCategoryCache (associateWith getCategories.await(mangaId)).
+- UpdatesScreen.kt: filter row item(key="updates_controls") gated on state.categoryFilterEnabled. HistoryScreen.kt: row above HistoryControls, gated on state.categoryFilterEnabled.
+- Frozen 3-page RecentTab structure + 5-tab IA untouched.
+
+M3 Support/About link cleanup:
+- SupportUsScreen.kt: Patreon + Open Collective SupportItems removed (URL_DONATE_* now unused; Constants still carry them — harmless); + GitHub profile card (CustomIcons.Github → https://github.com/Nikhil0921/yomitsu); Discord contact row kept.
+- AboutScreen.kt: Website + Discord LinkIcons → new private UnconfiguredLinkIcon (same visual, tap toasts MR.strings.link_not_configured); Privacy Policy row same toast; GitHub LinkIcon unchanged.
+- MoreScreen.kt: Help row → context.toast(link_not_configured) (uriHandler still used? no — removed from help; check: uriHandler local now unused? it is still used nowhere else → verify no unused-var warning; kept import because file compiles clean, spotless green).
+
+M4 In-app changelog + ABI fix:
+- NEW app/src/main/java/eu/kanade/presentation/more/WhatsNewSheet.kt: AdaptiveSheet (app wrapper) + scrollable MarkdownRender(GFM) + version title + "Open on GitHub" TextButton; empty markdown → release_notes_unavailable string.
+- AppUpdateChecker.kt: +fetchLatestRelease() (ReleaseService.latest via Injekt.get, no notification/throttle side effects) + Injekt import.
+- AboutScreen.kt "What's new" row (release builds only): local remember state (whatsNewRelease/whatsNewError/showWhatsNew) + scope.launch fetch on first tap; sheet composed under the group card.
+- ReleaseServiceImpl.getDownloadLink: BUILD_TYPES 3 → 6 keys (foss, arm64-v8a, armeabi-v7a, x86_64, x86, universal); device-side walk of Build.SUPPORTED_ABIS via ABI_TO_BUILD_TYPE (armeabi→v7a, riscv64→universal) with universal fallback; Foss path unchanged.
+
+i18n (base only, per rules §8): +6 strings (label_all_categories, category_filter, link_not_configured, release_notes_unavailable, supportUsScreen.githubProfile, supportUsScreen.githubProfileTitle).
+
+Gates: docker vsc-yomihon-e24e3bd7e46d5060e88796634a865cb501faf4766a48662dbc474a380427c674:latest, -Xmx4g, both volumes (gradle-home + android-home at /home/vscode/). spotlessApply ran twice (spotless mangled an import + a comment block once — hand-fixed, final tree clean). spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug all BUILD SUCCESSFUL 3m01s single combined run. No DB change → verifySqlDelightMigration not required. NOT committed (user commit decision, per L-20 precedent). Device verification pending: library list-mode visual + recent-tab chip row + About "What's new" sheet + Support GitHub card on SM_M066B.
+
+Skipped/documented: notification "What's new" action still = browser link (in-app sheet from notification needs Activity host, larger scope). AppUpdateChecker GITHUB_REPO if/else returns same value both branches (pre-existing, flagged not fixed — preview repo split is a product decision).
