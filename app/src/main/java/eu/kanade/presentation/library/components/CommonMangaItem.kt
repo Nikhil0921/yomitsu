@@ -372,7 +372,7 @@ fun MangaListItem(
 }
 
 @Composable
-private fun ContinueReadingButton(
+internal fun ContinueReadingButton(
     iconSize: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,

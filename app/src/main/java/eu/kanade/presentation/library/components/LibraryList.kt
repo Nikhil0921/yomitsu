@@ -8,8 +8,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.ui.library.LibraryItem
+import eu.kanade.tachiyomi.ui.library.component.LibraryListItem
 import tachiyomi.domain.library.model.LibraryManga
-import tachiyomi.domain.manga.model.MangaCover
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.util.plus
 
@@ -42,27 +42,11 @@ internal fun LibraryList(
             items = items,
             contentType = { "library_list_item" },
         ) { libraryItem ->
-            val manga = libraryItem.libraryManga.manga
-            MangaListItem(
-                isSelected = manga.id in selection,
-                title = manga.title,
-                coverData = MangaCover(
-                    mangaId = manga.id,
-                    sourceId = manga.source,
-                    isMangaFavorite = manga.favorite,
-                    url = manga.thumbnailUrl,
-                    lastModified = manga.coverLastModified,
-                ),
-                badge = {
-                    DownloadsBadge(count = libraryItem.badges.downloadCount)
-                    UnreadBadge(count = libraryItem.badges.unreadCount)
-                    LanguageBadge(
-                        isLocal = libraryItem.badges.isLocal,
-                        sourceLanguage = libraryItem.badges.sourceLanguage,
-                    )
-                },
-                onLongClick = { onLongClick(libraryItem.libraryManga) },
+            LibraryListItem(
+                libraryItem = libraryItem,
+                isSelected = libraryItem.libraryManga.manga.id in selection,
                 onClick = { onClick(libraryItem.libraryManga) },
+                onLongClick = { onLongClick(libraryItem.libraryManga) },
                 onClickContinueReading = if (onClickContinueReading != null && libraryItem.unreadCount > 0) {
                     { onClickContinueReading(libraryItem.libraryManga) }
                 } else {
