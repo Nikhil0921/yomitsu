@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHost
@@ -18,8 +22,11 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,10 +45,14 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.TabText
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 data object RecentTab : Tab {
 
@@ -77,6 +88,13 @@ data object RecentTab : Tab {
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
 
+        // Sub-tab row (Continue / History / Updates) toggle: persisted like the
+        // Library tab's category-tab display pref; the filter icon in the top
+        // bar opens the display sheet that flips it.
+        val libraryPreferences = remember { Injekt.get<LibraryPreferences>() }
+        val showRecentTabs by libraryPreferences.showRecentTabs.collectAsState()
+        var showDisplaySheet by remember { mutableStateOf(false) }
+
         // One screen-level title; the Scaffold's AppBar handles the status-bar
         // inset so the tab row starts below the safe area. Enter-always keeps
         // the tab row pinned while the title collapses on scroll.
@@ -86,6 +104,14 @@ data object RecentTab : Tab {
                 AppBar(
                     title = stringResource(MR.strings.label_recent),
                     scrollBehavior = topBarScrollBehavior,
+                    actions = {
+                        IconButton(onClick = { showDisplaySheet = true }) {
+                            Icon(
+                                imageVector = Icons.Outlined.FilterList,
+                                contentDescription = stringResource(MR.strings.action_display),
+                            )
+                        }
+                    },
                 )
             },
             snackbarHost = {
@@ -102,18 +128,20 @@ data object RecentTab : Tab {
                     .fillMaxSize()
                     .padding(top = padding.calculateTopPadding()),
             ) {
-                PrimaryTabRow(selectedTabIndex = state.currentPage, modifier = Modifier.zIndex(1f)) {
-                    tabs.forEachIndexed { index, tab ->
-                        Tab(
-                            selected = state.currentPage == index,
-                            onClick = { scope.launch { state.animateScrollToPage(index) } },
-                            text = {
-                                TabText(
-                                    text = stringResource(tab.titleRes),
-                                )
-                            },
-                            unselectedContentColor = MaterialTheme.colorScheme.onSurface,
-                        )
+                if (showRecentTabs) {
+                    PrimaryTabRow(selectedTabIndex = state.currentPage, modifier = Modifier.zIndex(1f)) {
+                        tabs.forEachIndexed { index, tab ->
+                            Tab(
+                                selected = state.currentPage == index,
+                                onClick = { scope.launch { state.animateScrollToPage(index) } },
+                                text = {
+                                    TabText(
+                                        text = stringResource(tab.titleRes),
+                                    )
+                                },
+                                unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
                 HorizontalPager(
@@ -128,6 +156,10 @@ data object RecentTab : Tab {
                     )
                 }
             }
+        }
+
+        if (showDisplaySheet) {
+            RecentDisplaySheet(onDismiss = { showDisplaySheet = false })
         }
 
         LaunchedEffect(Unit) {

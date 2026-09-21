@@ -144,27 +144,9 @@ class LibraryPreferences(
 
     // endregion
 
-    // region Recent category filter
+    // region Recent tab display
 
-    val displayRecentUpdatesCategoryFilter: Preference<Boolean> = preferenceStore.getBoolean(
-        "display_recent_updates_category_filter",
-        true,
-    )
-
-    val recentUpdatesCategoryId: Preference<Int> = preferenceStore.getInt(
-        "recent_updates_category_id",
-        0,
-    )
-
-    val displayRecentHistoryCategoryFilter: Preference<Boolean> = preferenceStore.getBoolean(
-        "display_recent_history_category_filter",
-        true,
-    )
-
-    val recentHistoryCategoryId: Preference<Int> = preferenceStore.getInt(
-        "recent_history_category_id",
-        0,
-    )
+    val showRecentTabs: Preference<Boolean> = preferenceStore.getBoolean("display_recent_tabs", true)
 
     // endregion
 

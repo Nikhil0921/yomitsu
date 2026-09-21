@@ -37,7 +37,6 @@ import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.chapter.interactor.GetChapter
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
@@ -61,7 +60,6 @@ class UpdatesScreenModel(
     private val getUpdates: GetUpdates = Injekt.get(),
     private val getManga: GetManga = Injekt.get(),
     private val getChapter: GetChapter = Injekt.get(),
-    private val getCategories: GetCategories = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
     private val updatesPreferences: UpdatesPreferences = Injekt.get(),
     val snackbarHostState: SnackbarHostState = SnackbarHostState(),
@@ -75,16 +73,6 @@ class UpdatesScreenModel(
     // First and last selected index in list
     private val selectedPositions: Array<Int> = arrayOf(-1, -1)
     private val selectedChapterIds: HashSet<Long> = HashSet()
-
-    private var categoryMembershipCache: Map<Long, Boolean> = emptyMap()
-
-    private suspend fun mangaInCategory(mangaId: Long, categoryId: Int): Boolean {
-        if (categoryId == 0) return true
-        categoryMembershipCache[mangaId]?.let { return it }
-        val result = getCategories.await(mangaId).any { it.id == categoryId.toLong() }
-        categoryMembershipCache = categoryMembershipCache + (mangaId to result)
-        return result
-    }
 
     init {
         screenModelScope.launchIO {
@@ -120,33 +108,6 @@ class UpdatesScreenModel(
                         it.copy(
                             isLoading = false,
                             items = updateItems,
-                        )
-                    }
-                }
-        }
-
-        screenModelScope.launchIO {
-            combine(
-                libraryPreferences.displayRecentUpdatesCategoryFilter.changes(),
-                libraryPreferences.recentUpdatesCategoryId.changes(),
-            ) { enabled, categoryId ->
-                Pair(enabled, categoryId)
-            }
-                .distinctUntilChanged()
-                .collectLatest { (enabled, categoryId) ->
-                    mutableState.update { state ->
-                        state.copy(
-                            categoryFilterEnabled = enabled,
-                            categoryFilterId = categoryId,
-                            categoryFilteredMangaIds = if (enabled && categoryId != 0) {
-                                state.items
-                                    .map { it.update.mangaId }
-                                    .distinct()
-                                    .filter { mangaId -> mangaInCategory(mangaId, categoryId) }
-                                    .toSet()
-                            } else {
-                                emptySet()
-                            },
                         )
                     }
                 }
@@ -490,20 +451,12 @@ class UpdatesScreenModel(
         val items: List<UpdatesItem> = listOf(),
         val expandedGroupIds: Set<Long> = emptySet(),
         val dialog: Dialog? = null,
-        val categoryFilterEnabled: Boolean = false,
-        val categoryFilterId: Int = 0,
-        val categoryFilteredMangaIds: Set<Long> = emptySet(),
     ) {
         val selected = items.filter { it.selected }
         val selectionMode = selected.isNotEmpty()
 
         fun getUiModel(): List<UpdatesUiModel> {
             return items
-                .filter { item ->
-                    !categoryFilterEnabled ||
-                        categoryFilterId == 0 ||
-                        item.update.mangaId in categoryFilteredMangaIds
-                }
                 .map { UpdatesUiModel.Item(it) }
                 .insertSeparators { before, after ->
                     val beforeDate = before?.item?.update?.dateFetch?.toLocalDate()

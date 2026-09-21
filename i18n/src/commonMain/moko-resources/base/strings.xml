@@ -39,8 +39,7 @@
     <string name="label_default">Default</string>
     <string name="label_warning">Warning</string>
     <string name="label_auto">Auto</string>
-    <string name="label_all_categories">All</string>
-    <string name="category_filter">Category</string>
+    <string name="show_recent_tabs">Show tabs</string>
     <string name="link_not_configured">This feature/link is currently not configured by the developer.</string>
     <string name="release_notes_unavailable">Release notes are currently unavailable.</string>
 

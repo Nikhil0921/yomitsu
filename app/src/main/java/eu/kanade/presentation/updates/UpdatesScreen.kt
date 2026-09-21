@@ -38,7 +38,6 @@ import androidx.compose.ui.util.fastAny
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
 import eu.kanade.presentation.manga.components.MangaBottomActionMenu
 import eu.kanade.tachiyomi.data.download.model.Download
-import eu.kanade.tachiyomi.ui.recent.RecentCategoryFilterRow
 import eu.kanade.tachiyomi.ui.updates.UpdatesItem
 import eu.kanade.tachiyomi.ui.updates.UpdatesScreenModel
 import kotlinx.coroutines.delay
@@ -121,9 +120,6 @@ fun UpdateScreen(
                         // Page-level controls; the Recent host provides the
                         // screen title.
                         item(key = "updates_controls") {
-                            if (state.categoryFilterEnabled) {
-                                RecentCategoryFilterRow(isUpdatesPage = true)
-                            }
                             UpdatesControls(
                                 selectionMode = state.selectionMode,
                                 selectedCount = state.selected.size,
