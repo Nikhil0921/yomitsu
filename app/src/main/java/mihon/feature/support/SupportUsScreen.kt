@@ -34,8 +34,7 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.icons.CustomIcons
 import tachiyomi.presentation.core.icons.Discord
-import tachiyomi.presentation.core.icons.OpenCollective
-import tachiyomi.presentation.core.icons.Patreon
+import tachiyomi.presentation.core.icons.Github
 
 class SupportUsScreen : Screen() {
 
@@ -86,27 +85,19 @@ class SupportUsScreen : Screen() {
                     modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
                 )
 
-                SupportItem(
-                    icon = CustomIcons.Patreon,
-                    title = stringResource(MR.strings.supportUsScreen_donationPlatform_patreon),
-                    onClick = { uriHandler.openUri(Constants.URL_DONATE_PATREON) },
-                )
-                SupportItem(
-                    icon = CustomIcons.OpenCollective,
-                    title = stringResource(MR.strings.supportUsScreen_donationPlatform_opencollective),
-                    onClick = { uriHandler.openUri(Constants.URL_DONATE_OPENCOLLECTIVE) },
-                )
-
+                // GitHub profile card: the single maintained link in this
+                // screen; Patreon / Open Collective rows were retired when
+                // donation URLs stopped being configured by the maintainer.
                 Text(
-                    text = stringResource(MR.strings.supportUsScreen_currentlySupportedBy, 200),
+                    text = stringResource(MR.strings.supportUsScreen_githubProfile),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
                 )
 
-                Text(
-                    text = stringResource(MR.strings.supportUsScreen_contactForDetailsMessage),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
+                SupportItem(
+                    icon = CustomIcons.Github,
+                    title = stringResource(MR.strings.supportUsScreen_githubProfileTitle),
+                    onClick = { uriHandler.openUri("https://github.com/Nikhil0921/yomitsu") },
                 )
 
                 SupportItem(

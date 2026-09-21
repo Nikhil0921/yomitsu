@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
@@ -28,6 +32,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.LogoHeader
+import eu.kanade.presentation.more.WhatsNewSheet
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.presentation.util.LocalBackPress
@@ -49,10 +54,12 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.release.interactor.GetApplicationRelease
+import tachiyomi.domain.release.model.Release
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.LinkIcon
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.icons.CustomIcons
 import tachiyomi.presentation.core.icons.Discord
@@ -145,10 +152,35 @@ object AboutScreen : Screen() {
                         }
 
                         if (!BuildConfig.DEBUG) {
+                            var whatsNewRelease by remember { mutableStateOf<Release?>(null) }
+                            var whatsNewError by remember { mutableStateOf(false) }
+                            var showWhatsNew by remember { mutableStateOf(false) }
                             TextPreferenceWidget(
                                 title = stringResource(MR.strings.whats_new),
-                                onPreferenceClick = { uriHandler.openUri(RELEASE_URL) },
+                                onPreferenceClick = {
+                                    scope.launch {
+                                        if (whatsNewRelease == null && !whatsNewError) {
+                                            runCatching {
+                                                whatsNewRelease = AppUpdateChecker().fetchLatestRelease()
+                                            }.onFailure {
+                                                whatsNewError = true
+                                            }
+                                        }
+                                        showWhatsNew = true
+                                    }
+                                },
                             )
+                            if (showWhatsNew) {
+                                WhatsNewSheet(
+                                    versionName = whatsNewRelease?.version ?: "Latest",
+                                    markdown = whatsNewRelease?.info.orEmpty(),
+                                    releaseLink = whatsNewRelease?.releaseLink ?: RELEASE_URL,
+                                    onOpenInBrowser = {
+                                        uriHandler.openUri(whatsNewRelease?.releaseLink ?: RELEASE_URL)
+                                    },
+                                    onDismiss = { showWhatsNew = false },
+                                )
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
@@ -158,9 +190,13 @@ object AboutScreen : Screen() {
                             onPreferenceClick = { navigator.push(OpenSourceLicensesScreen()) },
                         )
 
+                        // Unconfigured by the maintainer today — intercept and
+                        // toast instead of opening a possibly-dead external URL.
                         TextPreferenceWidget(
                             title = stringResource(MR.strings.privacy_policy),
-                            onPreferenceClick = { uriHandler.openUri("https://yomihon.github.io/privacy/") },
+                            onPreferenceClick = {
+                                context.toast(MR.strings.link_not_configured)
+                            },
                         )
                     }
                 }
@@ -169,18 +205,22 @@ object AboutScreen : Screen() {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp),
+                            .padding(vertical = 8.dp)
+                            .padding(horizontal = MaterialTheme.padding.extraSmall),
                         horizontalArrangement = Arrangement.Center,
                     ) {
-                        LinkIcon(
+                        // Website / Discord: unconfigured by the maintainer —
+                        // intercepted with a non-intrusive toast instead of a
+                        // possibly-dead external URL.
+                        UnconfiguredLinkIcon(
                             label = stringResource(MR.strings.website),
                             icon = Icons.Outlined.Public,
-                            url = "https://yomihon.github.io/",
+                            context = context,
                         )
-                        LinkIcon(
+                        UnconfiguredLinkIcon(
                             label = "Discord",
                             icon = CustomIcons.Discord,
-                            url = Constants.URL_DISCORD,
+                            context = context,
                         )
                         /*
                         Not currently used socials
@@ -208,6 +248,28 @@ object AboutScreen : Screen() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Looks like a [LinkIcon] but intercepts the tap with a "not configured"
+     * toast for external destinations the maintainer has not set up.
+     */
+    @Composable
+    private fun UnconfiguredLinkIcon(
+        label: String,
+        icon: ImageVector,
+        context: Context,
+    ) {
+        IconButton(
+            modifier = Modifier.padding(4.dp),
+            onClick = { context.toast(MR.strings.link_not_configured) },
+        ) {
+            Icon(
+                imageVector = icon,
+                tint = MaterialTheme.colorScheme.primary,
+                contentDescription = label,
+            )
         }
     }
 

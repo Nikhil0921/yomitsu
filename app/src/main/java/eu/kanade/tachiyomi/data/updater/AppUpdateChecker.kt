@@ -6,6 +6,10 @@ import eu.kanade.tachiyomi.util.system.isFossBuildType
 import eu.kanade.tachiyomi.util.system.isPreviewBuildType
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.release.interactor.GetApplicationRelease
+import tachiyomi.domain.release.model.Release
+import tachiyomi.domain.release.service.ReleaseService
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 
 class AppUpdateChecker {
@@ -31,6 +35,24 @@ class AppUpdateChecker {
             }
 
             result
+        }
+    }
+
+    /**
+     * Fetches the latest release without side effects (no notification, no
+     * throttle write) for passive "view release notes" surfaces.
+     */
+    suspend fun fetchLatestRelease(): Release? {
+        return withIOContext {
+            Injekt.get<ReleaseService>().latest(
+                GetApplicationRelease.Arguments(
+                    isFossBuildType,
+                    isPreviewBuildType,
+                    BuildConfig.COMMIT_COUNT.toInt(),
+                    BuildConfig.VERSION_NAME,
+                    GITHUB_REPO,
+                ),
+            )
         }
     }
 }

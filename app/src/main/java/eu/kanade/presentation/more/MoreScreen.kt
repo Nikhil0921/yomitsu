@@ -20,7 +20,7 @@ import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
@@ -29,7 +29,7 @@ import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.more.DownloadQueueState
 import eu.kanade.tachiyomi.ui.more.OcrQueueState
-import tachiyomi.core.common.Constants
+import eu.kanade.tachiyomi.util.system.toast
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -55,7 +55,7 @@ fun MoreScreen(
     onClickSupport: () -> Unit,
     onClickAbout: () -> Unit,
 ) {
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
 
     Scaffold { contentPadding ->
         ScrollbarLazyColumn(contentPadding = contentPadding) {
@@ -195,7 +195,11 @@ fun MoreScreen(
                     TextPreferenceWidget(
                         title = stringResource(MR.strings.label_help),
                         icon = Icons.AutoMirrored.Outlined.HelpOutline,
-                        onPreferenceClick = { uriHandler.openUri(Constants.URL_HELP) },
+                        onPreferenceClick = {
+                            // Unconfigured by the maintainer — non-intrusive
+                            // toast instead of opening a possibly-dead URL.
+                            context.toast(MR.strings.link_not_configured)
+                        },
                     )
                 }
             }

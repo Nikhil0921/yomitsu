@@ -41,7 +41,16 @@ class ReleaseServiceImpl(
         }
 
         return if (!isFoss) {
-            map[Build.SUPPORTED_ABIS[0]] ?: map[null]
+            // Try the device's own ABI first, then fall back to the
+            // architecture-generic (universal) entry. Covers all 5 shipped
+            // ABIs (arm64-v8a, armeabi-v7a, x86_64, x86, universal) — the
+            // older matcher only keyed 3 suffixes so v7a/x86 devices silently
+            // lost their download link when the universal APK was absent.
+            val abiLink = Build.SUPPORTED_ABIS.firstNotNullOfOrNull { abi ->
+                val key = ABI_TO_BUILD_TYPE[abi]
+                key?.let { map[it] }
+            }
+            abiLink ?: map[UNIVERSAL]
         } else {
             map[FOSS]
         }
@@ -49,7 +58,16 @@ class ReleaseServiceImpl(
 
     companion object {
         private const val FOSS = "foss"
-        private val BUILD_TYPES = listOf(FOSS, "arm64-v8a", "x86_64")
+        private const val UNIVERSAL = "universal"
+        private val BUILD_TYPES = listOf(FOSS, "arm64-v8a", "armeabi-v7a", "x86_64", "x86", UNIVERSAL)
+        private val ABI_TO_BUILD_TYPE = mapOf(
+            "arm64-v8a" to "arm64-v8a",
+            "riscv64" to "universal",
+            "armeabi-v7a" to "armeabi-v7a",
+            "armeabi" to "armeabi-v7a",
+            "x86_64" to "x86_64",
+            "x86" to "x86",
+        )
 
         /**
          * Regular expression that matches a mention to a valid GitHub username, like it's
