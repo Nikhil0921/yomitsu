@@ -8,6 +8,18 @@
 
 ## Recent sessions (most recent first)
 
+### 2026-09-21 — Recent tab display sheet & sub-tab toggle (revert of Phase 2 M2 category chips)
+
+Phase 2 M2 (category chip filtering on Updates/History) was the wrong interpretation of "recent tab category toggle" — the user wanted the Library-tab **display-sheet pattern**: a top-bar filter icon opening a display sheet with a "Show tabs" switch. Revert + replace, all in one commit `8732ed49d`:
+
+- DELETED `RecentCategoryFilterRow.kt`; reverted chip-row rendering from `UpdatesScreen.kt`/`HistoryScreen.kt`; reverted category-filter logic from `UpdatesScreenModel` (removed `GetCategories` injection, `mangaInCategory` cache, `categoryFilter*` state fields + the pref-combine launch) and `HistoryScreenModel` (removed `filterHistoryByCategory`/`primeCategoryCache`/`mangaCategoryCache` + the second launch block); removed the 4 Phase-2 keys (`displayRecentUpdates/HistoryCategoryFilter`, `recentUpdates/HistoryCategoryId`) from `LibraryPreferences`; dropped now-unused i18n `label_all_categories`/`category_filter`.
+- NEW `LibraryPreferences.showRecentTabs` = `getBoolean("display_recent_tabs", true)`.
+- NEW `RecentDisplaySheet.kt` (recent package): `AdaptiveSheet` + `PreferenceGroupCard("Display")` + `SwitchPreferenceWidget("Show tabs")` live-collecting `showRecentTabs` (`collectAsState` from presentation-core util).
+- `RecentTab.kt`: filter_list (`Icons.Outlined.FilterList`) top-bar action opens the sheet; `PrimaryTabRow` (Continue|History|Updates) now gated on `showRecentTabs`; when off, the `HorizontalPager` sits directly under the top bar (swiping still works — pager state retained). Frozen 3-page structure untouched.
+- i18n base: `show_recent_tabs` ("Show tabs"). Reused existing `action_display` for the group header — no new duplicate.
+
+Gates green (docker -Xmx4g both volumes): spotlessApply+Check + :app:testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 3m48s. No DB change. NOTE: M1/M3/M4 from the Phase 2 commit remain shipped & correct — only M2 was reverted/replaced.
+
 ### 2026-09-21 — Phase 2 implementation: Yomitsu UI refinement & bug fixes (4 modules)
 
 Implemented all 4 modules from Phase 1 audit (docs/audits/yomitsu-ui-refinement-phase1-audit.md). **Gates GREEN** (docker vsc-yomihon-e24e3bd7…, -Xmx4g, both volumes): spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 3m01s single-pass.

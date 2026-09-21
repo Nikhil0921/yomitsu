@@ -12,14 +12,15 @@
 Project:        Yomitsu — Android manga/comic reader, OCR + Read-Aloud TTS, dictionary/language tooling
 Version:        0.5.4.2 / versionCode 32 (app/build.gradle.kts single source of truth)
 Latest release: v0.5.4.2 (tag 20f4eb746, published 2026-09-20, GitHub Latest, 5 ABI APKs)
-Branch/HEAD:    main @ 17773e92c — next-chapter image prefetch pipeline COMMITTED locally
-                 (not pushed); Phase 2 UI-refinement batch UNCOMMITTED in working tree
-                 (15 modified + 3 new src files + i18n + audit doc)
-Working tree:   DIRTY (Phase 2 implementation, gates green, awaiting user commit)
-Current phase:  Phase 2 Yomitsu UI refinement & bug fixes (4 modules) implemented 09-21,
-                uncommitted
-Last gates:     2026-09-21 Phase 2: spotlessCheck + :app:testDebugUnitTest +
-                :app:assembleDebug all BUILD SUCCESSFUL 3m01s (docker -Xmx4g, both volumes)
+Branch/HEAD:    main @ 8732ed49d — Recent-tab display sheet + sub-tab toggle
+                 (reverted the Phase 2 M2 category-chip misconception); Phase 2
+                 M1/M3/M4 still shipped; prefetch + Phase-2 commits local (not pushed)
+Working tree:   clean
+Current phase:  Phase 2 Yomitsu UI refinement — M2 corrected to display-sheet
+                 pattern (showRecentTabs pref + RecentDisplaySheet + tab-row gate)
+Last gates:     2026-09-21: spotlessCheck + :app:testDebugUnitTest +
+                :app:assembleDebug all BUILD SUCCESSFUL 3m48s (docker -Xmx4g,
+                both volumes); no DB change
 Last release:   2026-09-20 v0.5.4.2 released locally (docker -Xmx4g, both volumes):
                 gates green 5m08s (spotless+test+verifySqlDelightMigration),
                 assembleRelease 19m36s, APK cert SHA-256 verified = e486ea51...8968,
