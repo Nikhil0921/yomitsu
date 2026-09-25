@@ -51,8 +51,16 @@ There is exactly ONE.
 
 ```text
 CURRENT AUTHORIZED TASK:
+    NONE EXECUTABLE. (2026-09-25 full OCR/prefetch/latency system audit —
+    read-only, zero source changes — closed with report
+    docs/audits/ocr-prefetch-latency-audit-report.md + doc updates.
+    Newly identified optimization tasks S1–S5 registered in §E below,
+    ALL UNAUTHORIZED pending user scope sign-off. S4 (FAST first-pass /
+    asset repackaging) explicitly conflicts with the shipped
+    −133MB local-OCR-removal rejection in §F — user must lift that
+    rejection for the NEW dual-stage architecture before any code.)
+
     NEXT-CHAPTER IMAGE PREFETCH PIPELINE 2026-09-20 (user task prompt,
-    post-v0.5.4.2): IMPLEMENTED + GATES GREEN + DEVICE VERIFIED.
     Background fetch of N+1 first 4 page images after N loads;
     eliminates 10-30s transition stall. Based on Phase 1 read-only
     audit (docs/audits/reader-prefetch-phase1-audit.md). Scope:
@@ -202,6 +210,57 @@ STATUS 2026-09-13: Q3, Q4, Q5, Q6, Q7, Q8 HARD HALTED by user — do
     not work on them without new authorization. Q9 EXECUTED in the
     2026-09-13 master session (see §M history). Queue order below
     preserved for whenever the halt lifts.
+
+S1–S5 NEW — from 2026-09-25 full OCR/prefetch/latency system audit
+(docs/audits/ocr-prefetch-latency-audit-report.md §8). All UNAUTHORIZED
+pending user sign-off. Priority tiers: P1 = measurable user-visible
+latency cut, small diff; P2 = architectural/infra follow-ups; P3 =
+scope-gated (needs explicit decision / asset changes). Order =
+recommended execution sequence; S2 depends on S1; S4 is a scope
+decision (see §F note) and may be dropped without breaking S1–S3/S5.
+
+S1. P1. PrioritizedTaskQueue LOW tier (+OcrScanPriority.LOW mapping).
+      ~15 lines + enum + 1 test. Prereq for S2. Rationale: N+1
+      background OCR prefetch must not starve TTS prefetch (current
+      HIGH/NORMAL cap-3 queue fills on TTS lookahead 2–3 pages,
+      measured 0.615s HIGH wait Stage 4P).
+  ↓
+S2. P1. Reader-entry N+1 background OCR prefetch: OcrScanManager.enqueue
+      next-unread id on reader open (ReaderViewModel hook next to
+      nextChapterPrefetchJob; shared cellular + uncached +
+      TTS-auto-next-chapter guards; LOW priority via S1;
+      NextChapterPrefetchGate-style one-shot gate). Automates the
+      "Scan Next Chapter" FAB (MangaScreenModel.scanNextUnreadChapter)
+      without removing it (queue dedupes by chapter id → FAB stays a
+      harmless manual override). Closes RC-7: reader-open p0 prefetch
+      currently skips N+1 when TTS is active (the auto-advance case).
+      Design spec: design.md §15.2/§15.3 (spinner already on FAB via
+      observeOcrQueue; zero new UI).
+  ↓
+S3. P1. applyVoiceConfig skip-on-unchanged-prefs (~250ms/resume;
+      Stage 4N seam; audit RC-5). TtsEngine fast path only;
+      setEnginePackage/shutdown path unchanged.
+  ↓
+S4. P3 (SCOPE DECISION). FAST local first-pass text for cold p0 +
+      ocr_fast tflite asset repackaging into release (hybrid
+      dual-stage Stage 1; audit §5). CONFLICTS with §F row "Local
+      OCR engine reinstatement REJECTED (reverses shipped −133MB
+      optimization)" — that rejection covered restoring the legacy
+      LOCAL-ONLY pipeline as primary; S4 is a different architecture
+      (FAST interim text under GLENS-authoritative Stage 2, p0 cold
+      only, never mid-chapter). User must explicitly lift the §F
+      rejection for THIS architecture before any code; also add a
+      release-APK size check (ocr_fast encoder+decoder tflites).
+  ↓
+S5. P2. GLENS connection pooling: GlensOcrEngine.executeRequest raw
+      HttpURLConnection (per-tile connect + disconnect-in-finally,
+      no keep-alive reuse despite the Connection header being set)
+      → shared OkHttp client (already in the app via NetworkHelper /
+      libs.versions.toml 5.4.0). Kills the 4.9s first-batch
+      handshake p90 (Stage 4M upload p90). ~30-line engine change;
+      keep the single retry-on-transient path (OcrRepositoryImpl
+      isTransientHttpFailure) unchanged.
+  ↓
 
 NEXT (was): Q3. Recursive dictionary lookup design + implementation
     (REF-CHI-001): design pass first (popup interaction, back-stack,
@@ -457,5 +516,7 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 | 2026-09-13 | ANYMEX UI MODERNIZATION MICRO-BATCH (user-authorized post-v0.5.4.1; visual corrections only): DS-01 SettingsDictionaryScreen OCR-results group → PreferenceGroupCard (last grouped-settings holdout); DS-03 SettingsSearch rows 24/14dp → 16/12dp token rhythm; DS-06 Feed customize icon List → GridView; DS-02 compact-grid cover scrim Color(0xAA000000) → colorScheme.scrim.copy(0.67f); FeedCustomizeDialog gaps 8→12dp grouped-card rhythm. 4 files + docs. Reference = AnymeX hierarchy/grouping intent only (no cloning). Liquid/blur/IA-regroup/nav/Q3-Q8 explicitly NOT touched. Gates green docker (spotlessCheck + testDebugUnitTest + verifySqlDelightMigration + assembleDebug, chained 3m15s). Device SM_M066B smoke PASS: Dictionary card renders tonal + rows inside (px band verified), Settings search live w/ 16dp rows, Feed row+chips+customize sheet intact, Library grid + badges render, Recent Continue + Browse sources render, More Studies card intact, 0 FATAL. UNCOMMITTED. | opencode anymex-ui session |
 | 2026-09-16 | Q8 FEED AUTO-PAGINATION (user-authorized; scope: FeedScreen.kt + FeedScreenModelStateTest.kt only): (1) Auto-pagination: `selectedSourceId != null` gates trigger; `LazyGridState` + `snapshotFlow { nearEnd }.distinctUntilChanged()` → `onLoadMore(lastFeed)` when within `AUTO_LOAD_THRESHOLD = 5` items of grid end; `isLoadingMore`/`hasMore` guards preserved; existing `loadMore()` untouched; FeedScreenModel.kt UNTOUCHED. (2) All Sources source headers: when `selectedSourceId == null`, insert full-span `Text(sourceName, labelMedium, 8dp/4dp padding)` before each source section; no divider, no card, no AppBar; spacing intentionally minimal. (3) Tests: 2 new in FeedScreenModelStateTest (`single source without listing override shows both feeds`, `single source with listing override shows one feed`); 9/9 total. Gates green docker (spotlessCheck 35s, testDebugUnitTest 3m45s, :app:assembleDebug 4m4s). Device verification PENDING. Key design decision: `lastOrNull()` (not `singleOrNull()`) for trigger — correct for 1-feed (listing selected) and 2-feed (no listing) cases in single-source mode. | opencode feed-auto-pagination session |
 | 2026-09-20 | NEXT-CHAPTER IMAGE PREFETCH PIPELINE (user task prompt Phase 2/3, post-v0.5.4.2; built on Phase 1 read-only audit): after active chapter N loads, background-fetch N+1 first 4 page images into ChapterCache via N+1's OWN HttpPageLoader queue (per-chapter isolation — N's active loads/OCR/TTS never preempted). Changes: ReaderPreferences.prefetchNextChapter (key reader_prefetch_next_chapter, default true) + SettingsReaderScreen Reading-group toggle + 2 i18n base strings; NextChapterPrefetchGate (one-shot per active-chapter id, re-arms on chapter change) + 2 unit tests; ChapterLoader.prefetchFirstPages(chapter,4) — no-op for local/downloaded (isLocal guard), remote → loadPage on p0..p3 (ADJACENT auto-enqueue); ReaderViewModel.maybePrefetchNextChapter trigger at loadChapter success (guards: pref on, nextChapter != null, HttpSource, non-cellular TRANSPORT_CELLULAR, gate) + cancel in loadNewChapter + onCleared. TtsPlaybackController ZERO changes. Gates green docker (spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug, 5m46s). DEVICE VERIFIED SM_M066B (unlocked): 3× logcat firings on remote source Asura Scans (A Dragonslayer ch3→4, Villain To Kill ch8→9, + uuid reader-open); N+1 p0..p3 all `internalLoadPage ... status=Ready` in isolated worker; fresh force-stopped process re-fired correctly; disk-cache hits on reopen. Cellular short-circuit NOT exercised live (no root for network-class forcing) — code-reviewed only; ponytail ceiling noted (TRANSPORT_CELLULAR vs NET_CAPABILITY_METERED). UNCOMMITTED — awaiting user commit decision (task says commit; not yet committed). | opencode prefetch-verify session |
+
+| 2026-09-25 | FULL OCR/PREFETCH/LATENCY SYSTEM AUDIT (user master prompt, read-only; zero source changes, docs-only): end-to-end trace page-load→prefetch→OCR→cache→TTS-init→speech-dispatch + dual-engine topology + PrioritizedTaskQueue semantics + ChapterCache bounds + FAB automation. Report: docs/audits/ocr-prefetch-latency-audit-report.md (RC-1..RC-8 root-cause matrix; step latency table w/ file:line citations; current vs proposed mermaid; S1–S5 checklist + SHOULD-NOT list). VERDICTS: residual N→N+1 latency = GLENS service wait (RC-1, med 9.6s/p90 17.9s Stage 4M — irreducible client-side; shipped image+OCR prefetch already hides everything else, all transition steps <1s except GLENS); FAST engine dead on scan path (RC-6, UnavailableDetOcrEngine stub + gitignored ocr_fast assets — hybrid dual-stage Stage 1 conditionally feasible but conflicts with §F shipped −133MB rejection → new scope decision S4); N+1 OCR prefetch gap = reader-open p0 prefetch skipped while TTS active (RC-7, exactly the auto-advance case) → S1 (LOW queue tier) + S2 (reader-entry auto-enqueue via OcrScanManager; FAB stays idempotent manual override, design.md §15); applyVoiceConfig re-apply ~250ms/resume = S3; GLENS raw HttpURLConnection no keep-alive pooling = S5. NO tasks authorized — S1–S5 all UNAUTHORIZED pending user sign-off (§B now "NONE EXECUTABLE"). Docs updated: architecture.md §3.1 (transition prefetch pipeline) + §4.3 (hybrid dual-stage strategy) + §5.4 (TTS warm engine lifecycle, device-measured); design.md §15 (reader loading states / prefetch feedback / manual scan override semantics); phase.md current-pointer updated; memory.md + state.md + history appended. No gates run (docs-only). | opencode OCR-audit session |
 
 END OF ROADMAP.

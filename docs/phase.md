@@ -5,7 +5,29 @@
 > A phase is COMPLETED only when its verification steps have actually been run
 > and recorded in `docs/memory.md`.
 
-Current phase pointer: **v0.5.4.2 RELEASED 2026-09-20 (user-authorized release task).
+Current phase pointer: **FULL OCR ARCHITECTURE, PREFETCH & LATENCY SYSTEM AUDIT
+COMPLETE 2026-09-25 (user master prompt, post-v0.5.4.2): read-only end-to-end
+audit (zero source changes) covering page-load/prefetch/OCR/cache/TTS-init/
+speech-dispatch + dual-engine topology + queue priorities + FAB automation.
+Report: docs/audits/ocr-prefetch-latency-audit-report.md (484 lines,
+file:line-cited, root-cause matrix RC-1..RC-8, step-by-step latency table,
+current vs proposed mermaid diagrams, S1–S5 actionable checklist + SHOULD-NOT
+list). Verdicts: residual N→N+1 latency = GLENS service wait (RC-1,
+irreducible client-side; med 9.6s/p90 17.9s Stage 4M) — everything else on
+the transition path already <1s via shipped image+OCR prefetch; FAST local
+engine dead on scan path (RC-6, UnavailableDetOcrEngine stub + gitignored
+assets); hybrid local-first dual-stage = CONDITIONALLY FEASIBLE but conflicts
+with shipped −133MB local-OCR-removal rejection → new user scope decision
+(S4); N+1 OCR prefetch gap = TTS-active skip in maybePrefetchReaderOpenOcr
+(RC-7) → S1 (LOW queue tier) + S2 (reader-entry auto-enqueue via
+OcrScanManager, FAB remains as idempotent manual override); applyVoiceConfig
+re-apply ~250ms/resume = S3 seam; GLENS no keep-alive pooling = S5. Docs
+updated same session: architecture.md §3.1/§4.3/§5.4, design.md §15,
+phase.md + implementation-roadmap.md (audit logged, S-tasks queued with
+priority tiers, UNAUTHORIZED — execution needs user sign-off), memory.md +
+state.md + history/session-logs.md appended. No gates run (docs-only
+session, zero source changes).**
+   Prior: **v0.5.4.2 RELEASED 2026-09-20 (user-authorized release task).
   Version bump 0.5.4.1/vc31 → 0.5.4.2/vc32 committed as 20f4eb746 + tag v0.5.4.2,
   both pushed to origin (Nikhil0921/yomitsu). All 3 quality gates green in docker
   (-Xmx4g, both volumes): spotlessCheck + testDebugUnitTest + verifySqlDelightMigration

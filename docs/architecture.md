@@ -120,6 +120,9 @@ Flow:
 1. **Open**: `ReaderActivity.newIntent(manga, chapter)` → `viewModel.init(...)`
    loads manga, builds filtered `chapterList`, creates `ChapterLoader`, eagerly
    initializes the OCR model ("Initialize OCR model early", VM init).
+   Also fires the eager TTS engine init job (`ttsEagerInitJob`,
+   `ReaderViewModel.init`, overlapping Google TTS service startup with reader
+   prep; idempotent fast-path dedups against later Read-Aloud starts).
    Process-death restore via `SavedStateHandle(chapter_id, page_index)`.
 2. **Load chapter**: `ChapterLoader.getPageLoader()` picks loader by source type:
    downloaded → `DownloadPageLoader`; LocalSource format → Directory/Archive/Epub;
@@ -129,12 +132,12 @@ Flow:
    a priority queue (RETRY > DEFAULT > ADJACENT), preload next 4 pages, images
    cached to disk (`ChapterCache`, DiskLruCache 100 MiB).
 4. **Display**: `ViewerChapters` wrapped in adapters; `PagerViewer` (ViewPager)
-    or `WebtoonViewer` (RecyclerView) render pages via Coil +
-    `ReaderPageImageView` (subsampling for tall images). Page changes call
-    `activity.onPageSelected(page)` → `ReaderViewModel.onPageSelected` persists
-    progress, marks read, tracks, triggers downloads, emits `Event.PageChanged`
-    (TTS navigation debounced 250 ms for user swipes; advance confirmations
-    land immediately).
+   or `WebtoonViewer` (RecyclerView) render pages via Coil +
+   `ReaderPageImageView` (subsampling for tall images). Page changes call
+   `activity.onPageSelected(page)` → `ReaderViewModel.onPageSelected` persists
+   progress, marks read, tracks, triggers downloads, emits `Event.PageChanged`
+   (TTS navigation debounced 250 ms for user swipes; advance confirmations
+   land immediately).
 5. **Navigation**: toolbar/keyboard `loadNextChapter`/`loadPreviousChapter`;
    adjacent chapters preloaded (`preload`); transitions rendered between chapters;
    dual-page split and InsertPage handled inside pager adapters.
@@ -149,6 +152,33 @@ Flow:
     Compose overlays rendered via `binding.setComposeOverlay()` +
     `ContentOverlay(...)` (app bars, OCR selection overlay, dialogs,
     `OcrLoadingIndicator` at BottomCenter).
+
+### 3.1 Chapter-transition prefetch pipeline (shipped 2026-09-20, verified)
+
+- **N+1 image prefetch**: at N's `loadChapter` success,
+  `ReaderViewModel.maybePrefetchNextChapter` fires a best-effort job on
+  `viewModelScope`/IO: guards = `ReaderPreferences.prefetchNextChapter`
+  (default true) + `nextChapter != null` + source is `HttpSource` + NOT
+  `TRANSPORT_CELLULAR` + one-shot `NextChapterPrefetchGate` per active
+  chapter id. Job = `loader.loadChapter(next)` (page-list fetch) +
+  `loader.prefetchFirstPages(next)` (p0..p3; `HttpPageLoader.preloadNextPages`
+  auto-enqueues ADJACENT p1..p4). Runs on N+1's own `HttpPageLoader` queue
+  (per-chapter `PriorityBlockingQueue` + dedicated coroutine scope) so N's
+  active loads/TTS are never preempted in-thread. Cancel points:
+  `loadNewChapter` + `onCleared`. Eviction: N+1 prefetch writes 4 images into
+  the 100 MiB `DiskLruCache`, evicting ~5–10 oldest N images (safe,
+  refetchable). Local/downloaded chapters no-op; cellular short-circuits.
+- **Reader-open OCR prefetch**: `maybePrefetchReaderOpenOcr(0)` inside
+  `loadNewChapter` (NORMAL priority, one-shot `ReaderOpenPrefetchGate` keyed
+  by active chapter id) starts a p0 scan early so GLENS work overlaps reader
+  dwell time; later TTS acquisition joins the in-flight scan or hits the
+  cache. Skipped while a TTS session is active (its own prefetch covers
+  these pages) — that skip is deliberate for the ACTIVE chapter; N+1 is the
+  uncovered case (see §4.3 for the gap analysis).
+- TTS lookahead prefetch of p1..pN+depth (rate-aware depth 2–3) is inside
+  `TtsPlaybackController.schedulePrefetch`; OCR scans run through
+  `PrioritizedTaskQueue` (cap 3; HIGH = active-page on-demand, NORMAL =
+  all prefetch/background).
 
     > Historical note (RESOLVED): an earlier memory.md entry (Known-issue #2)
     > warned about a second, parallel `setComposeContent` composition block
@@ -199,6 +229,45 @@ Result representation (`domain/.../mihon/domain/ocr/model/OcrModels.kt`):
   — bounding boxes are normalized floats; orientation ∈ {Horizontal, Vertical}.
 - `OcrPageResult(chapterId, pageIndex, ocrModel, imageWidth, imageHeight, regions)`
   with computed flattened `text`.
+
+### 4.3 OCR execution strategy: hybrid local-first dual-stage pipeline (audit 2026-09-25, NOT shipped)
+
+Verdict from `docs/audits/ocr-prefetch-latency-audit-report.md` §5: the
+residual N→N+1 transition latency is dominated by GLENS service round-trip
+(median ~9.6s / p90 ~17.9s post-upload wait, device-measured 2026-09-19
+Stage 4M). Client-side scheduling (image prefetch + reader-open OCR
+prefetch, both shipped) hides everything else; the only structural
+levers left:
+
+- **Stage 1 (local FAST first-pass, <100ms)**: `FastOcrEngine.recognizeText`
+  (full-page TFLite inference, `ocr_fast/encoder+decoder.tflite`) yields
+  one region-less text blob for interim TTS start. CONDITIONAL: conflicts
+  with the shipped "local OCR engine reinstatement REJECTED" decision
+  (roadmap §F) — requires explicit user scope authorization + asset
+  repackaging (ocr_fast tflites back into release assets; legacy
+  assets/ocr/ removal saved −133MB in v0.5.4). JP-vocab model: English
+  manga text quality will be poor (interim only, never authoritative).
+- **Stage 2 (background GLENS upgrade)**: GLENS scan of N+1 runs in the
+  background at reader open / via the `OcrScanManager` service (same path
+  as the "Scan Next Chapter" FAB), upserting `OcrCacheStore` rows under
+  `ocr_model=GLENS`; TTS cache reads are model-pinned, so FAST interim
+  text and GLENS authoritative text coexist without clobbering. No
+  mid-session retro-re-speak — upgrade applies to later page acquisitions
+  only.
+- **Supporting changes (roadmap §E new tasks S1–S5)**: `PrioritizedTaskQueue`
+  +LOW tier; N+1 background OCR prefetch job in `ReaderViewModel` (shared
+  cellular guard + uncached-check + TTS-auto-next-chapter gate);
+  `applyVoiceConfig` skip-on-unchanged-prefs (~250ms/resume); GLENS
+  `HttpURLConnection` → shared OkHttp keep-alive pool (kills 4.9s
+  first-batch handshake p90; raw-connection path `GlensOcrEngine.kt:359-417`
+  currently `disconnect()`s per tile). None authorized/shipped yet.
+- **FAB automation (audit §7)**: recommended hook = reader-entry
+  auto-enqueue of the next-unread chapter id through
+  `OcrScanManager.enqueue` (~15 lines in `ReaderViewModel`, reuses the
+  `OcrScanJob` service path: progress UI, per-page resilience, network
+  checks in `OcrChapterScanner.kt:223-235`). Queue is idempotent
+  (dedupe by chapter id), so the manual FAB stays as a harmless override.
+  Not implemented — needs authorization.
 
 Ordering rules & caveats (important for TTS):
 
@@ -343,6 +412,25 @@ Phase 10A additions to `TtsEngine` (voice configuration contracts, shipped):
   DEBUG log, leave as-is). Voice/locale apply failures NEVER fail initialize.
 - `getEngines`/`getVoices` run on the Main context; return empty lists when
   uninitialized. Speak/stop/shutdown/focus paths unchanged from Phase 9.
+
+#### 5.4 TTS engine warm lifecycle (device-measured, 2026-09-19/20 Stage 2D/4N)
+
+- **Cold start** = `TextToSpeech` ctor + `readiness.await()` onInit callback:
+  ~5.4s genuine Google TTS service latency (device-measured, irreducible
+  client-side; one 28.9s anomalous boot observed, not an app bug).
+- **Warm reuse** (engine instance alive) = `applyVoiceConfig` fast path:
+  ~81ms measured. **Known overhead**: the warm path re-enumerates
+  `engine.voices` + `engine.engines` (~66/227 entries) and re-applies
+  `setVoice` even when prefs are unchanged — ~250–305ms on every
+  resume/reuse (audit RC-5; proposed fix S3 = skip re-apply when
+  `(enginePackage, voiceName, languageTag)` unchanged). Not first-speech
+  path.
+- **Eager init**: `ReaderViewModel.init` fires `ttsEagerInitJob`
+  (`ttsEngine.initialize()`, no focus/no speech, async) so the 5.4s cold
+  start overlaps reader prep — first Read-Aloud tap then hits the 81ms warm
+  path (Stage 2D: 43s pre-tap → 81ms reuse measured). `onCleared()`
+  detaches `onFocusEvent` + calls `ttsEngine.shutdown()` (no FGS; reader-
+  bound playback by durable decision #2).
 
 Preview policy (single shared engine): the read-aloud settings preview and
 reader narration use the same `AndroidTtsEngine` singleton; preview calls

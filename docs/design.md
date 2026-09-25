@@ -268,3 +268,61 @@ search. Composed of existing `Preference` components (`PreferenceGroup`,
   auto next chapter / keep-screen-on checkboxes + one "Advanced voice
   settings" row linking to the full screen (pitch slider relocated here from
   v1's reader tab — one obvious home for calibration).
+
+## 15. Reader loading states & background-prefetch feedback
+
+Grounds: the shipped N+1 image prefetch (2026-09-20), reader-open OCR
+prefetch (Stage 4P), and the "Scan Next Chapter" FAB (2026-09-19) — all
+run silently in the background. Design language below codifies how (or
+whether) that work is visible to the user; nothing here is a new UI
+surface, it refines existing components.
+
+### 15.1 Reader page-loading states
+
+- **Uncached transition (remote source)**: the transition page itself
+  already shows the existing `Page.State` rendering (loading/error retry
+  chips per page); N+1 p0..p3 are prewarmed by the background prefetch, so
+  in the common case the user lands on a Ready page with NO visible
+  loading affordance. Design rule: **no extra "prefetch in progress"
+  spinner in the reader** — the page-level state already answers the
+  question; a global prefetch indicator would be noise (prefetch is
+  best-effort and can fail silently by design).
+- **TTS Preparing/LoadingPage**: the playback pill's existing
+  `CircularProgressIndicator` (20dp, `§8`) is the ONLY in-reader loading
+  affordance for read-aloud. No second indicator family.
+- **Chapters on local/downloaded sources**: prefetch is a no-op (images
+  already on disk); no state difference visible — correct, no design
+  work.
+
+### 15.2 Manga-screen OCR scan feedback (FAB + auto-enqueue)
+
+- The "Scan Next Chapter" FAB (`Icons.Outlined.DocumentScanner`,
+  `MangaScreen`/`ContinueTab`) shows an in-FAB spinner while
+  `isNextOcrScanning` (driven by `MangaScreenModel.observeOcrQueue`
+  collecting `OcrScanManager.queueState`). This is the shipped pattern:
+  **progress belongs on the trigger itself, not on a toast/snackbar** —
+  the scan is long-running (minutes, whole chapter) and the user may
+  leave the screen; queue state survives via the persisted `OcrScanStore`
+  snapshot, and `OcrQueueScreen` (More tab) is the detail view.
+- If the proposed reader-entry auto-enqueue (audit §7, S2) ships, the
+  same `isNextOcrScanning` flag + spinner pattern applies with ZERO new
+  UI: the FAB merely stops being the *only* trigger; its spinner already
+  reflects queue state, and the queue dedupes by chapter id so a manual
+  tap during an auto-enqueued scan is a harmless no-op. No new i18n keys
+  needed for the auto path.
+- Rule: never add a reader-overlay ("scanning in background") pill for
+  this — it would cover artwork and compete with the TTS pill; the
+  manga-screen FAB + More-tab queue screen are the two sanctioned views
+  of OCR scan progress.
+
+### 15.3 Manual scan override semantics
+
+- FAB tap = "ensure the next unread chapter is queued for a full-chapter
+  GLENS scan" — idempotent, not a toggle. If already queued/scan-running,
+  the tap is a no-op (spinner already showing); no confirm dialog, no
+  duplicate entry in the queue (`OcrScanManager.enqueue` dedupes by
+  chapter id).
+- Cancellation happens only through `OcrQueueScreen` (pause/clear/reorder
+  rows) — the FAB itself never cancels. No "cancel scan" icon on the FAB
+  while spinning (would need a 2nd FAB affordance; out of scope — the
+  queue screen is the management surface).

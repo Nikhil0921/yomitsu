@@ -5,7 +5,35 @@
 
 ---
 
-## 2026-09-19 (Sat) — OCR per-page loop resilience + "Scan Next Chapter" FAB (user master prompt)
+## 2026-09-25 (Thu) — Full OCR architecture, prefetch & latency system audit (read-only, docs-only)
+
+**Task (user master prompt):** comprehensive end-to-end audit — page load, image prefetch, OCR execution (both engines), caching, TTS engine init, speech dispatch — plus dual-stage fallback feasibility, queue priorities, prefetch boundaries, and manual-FAB automation. Explicit instruction: complete Stage 1 (read-only analysis + report) fully BEFORE touching any architecture/design/phase/roadmap docs.
+
+**Stage 1 (audit report, zero source changes):**
+- Traced N→N+1 transition path end-to-end with file:line citations: `ReaderViewModel.loadAdjacent/loadNewChapter/maybePrefetchNextChapter/maybePrefetchReaderOpenOcr` (ReaderViewModel.kt:556-647, 593-620, 415-430), `ChapterLoader.prefetchFirstPages` (ChapterLoader.kt:83-93), `HttpPageLoader` per-chapter queue + ADJACENT preload (HttpPageLoader.kt:44-63, 89-117, 155-169), `OcrPageSourceResolver` cache-first page-list + image (OcrPageSourceResolver.kt:124-193, 195-335), `OcrRepositoryImpl` engine dispatch/queue/in-flight single-flight (OcrRepositoryImpl.kt:92-304, 418-476, 218-266), `PrioritizedTaskQueue` cap-3 HIGH/NORMAL drain (PrioritizedTaskQueue.kt:121-161), `OcrCacheStore` upsert/get/prune-5000 (OcrCacheStore.kt:31-131, 285), `GlensOcrEngine` tile math + TILE_CONCURRENCY=4 + raw-HttpURLConnection executeRequest w/ disconnect-in-finally (GlensOcrEngine.kt:36-57, 134-201, 359-417, 1023), `FastOcrEngine` full-page TFLite inference (FastOcrEngine.kt:249-416), `TtsPlaybackController` acquire/prefetch depth (TtsPlaybackController.kt:538-849), `AndroidTtsEngine` cold/warm init + applyVoiceConfig re-apply (AndroidTtsEngine.kt:54-126, 223-292), `MangaScreenModel.scanNextUnreadChapter`/`observeOcrQueue` (MangaScreenModel.kt:803-809, 600-617), `OcrChapterScanner` per-page resilience + network checks (OcrChapterScanner.kt:32-235), `OcrScanManager` idempotent enqueue dedupe (OcrScanManager.kt:51-74).
+- **Root-cause matrix RC-1..RC-8** (all code-verified + cross-checked against prior device-measured sessions Stages 4M/4L/4N/4P/2D):
+  - RC-1: GLENS post-upload service wait med ~9.6s / p90 ~17.9s = the dominant, client-irreducible N→N+1 latency (Stage 4M ch8475 numbers).
+  - RC-3: 0.615s HIGH queue wait when TTS prefetch depth 3 fills all 3 slots (Stage 4P measured; PrioritizedTaskQueue.kt:121-134 non-preempting drain explains it).
+  - RC-4/RC-5: TTS cold init ~5.4s (irreducible, Stage 4N) vs warm reuse 81ms; `applyVoiceConfig` re-enumerates+re-applies every warm call = ~250–305ms/resume (AndroidTtsEngine.kt:55-59, 223-292).
+  - RC-6: FAST local engine dead on scan path — `detectionEngine()` = `UnavailableDetOcrEngine` stub (OcrRepositoryImpl.kt:155-161, DetOcrEngine.kt:13-16) always redirects LEGACY/FAST→GLENS; `ocr_fast/*.tflite` gitignored/absent on fresh clones.
+  - RC-7: "Scan Next Chapter" FAB user-gated; `maybePrefetchReaderOpenOcr` skipped while TTS active (ReaderViewModel.kt:416-420) → N+1 uncovered during auto-advance, exactly the case TTS hits next.
+  - RC-8: single-stage — no local interim text; TTS p0 speech bounded by GLENS p0 return.
+- **Latency table** (current vs target, per step, M/T-marked) + **current vs proposed mermaid diagrams** + **S1–S5 actionable checklist** + **SHOULD-NOT list** (no TTS audio caching, no extra queue tiers beyond LOW, no preemption of running GLENS scans, no N+1 OCR prefetch without S1, no auto-enqueue when TTS-auto-next-chapter off, docs/app protocol respected).
+- **Dual-stage verdict (audit §5)**: Stage 1 (FAST <100ms interim text for cold p0) CONDITIONALLY FEASIBLE via `FastOcrEngine.recognizeText` full-page path (single region, order 0 — `SpeechPipeline` handles it), but CONFLICTS with roadmap §F "Local OCR engine reinstatement REJECTED" (−133MB shipped optimization) → requires explicit NEW user scope decision (S4) + asset repackaging + release-APK size check; JP-vocab model → poor English quality (interim-only, never authoritative, p0 cold only). Stage 2 (background GLENS upgrade) already ~shipped — `scanWithGlens` upserts `OcrCacheStore` on every scan incl. NORMAL prefetch (OcrRepositoryImpl.kt:454-467); the only gap is *triggering* N+1 OCR at reader open (RC-7).
+- **FAB automation verdict (audit §7)**: recommended hook = `ReaderViewModel.loadNewChapter`/`loadAdjacent` success → `OcrScanManager.enqueue([nextUnreadId])` (~15 lines, reuses `OcrScanJob` service path + idempotent dedupe + existing `observeOcrQueue` spinner; cellular + TTS-auto-next-chapter + uncached guards shared with image prefetch). FAB stays as harmless manual override. No new UI surface.
+- Saved as `docs/audits/ocr-prefetch-latency-audit-report.md` (484 lines), full text rendered to chat as required by the task.
+
+**Stage 2 (doc updates, per task protocol order):**
+- `architecture.md`: §3 new subsection §3.1 "Chapter-transition prefetch pipeline (shipped 2026-09-20, verified)" (N+1 image prefetch + reader-open OCR prefetch + TTS lookahead, with file:line); §4 new subsection §4.3 "OCR execution strategy: hybrid local-first dual-stage pipeline (audit 2026-09-25, NOT shipped)" (S1–S5 summary + FAB automation hook + constraint notes); §5 new subsection §5.4 "TTS engine warm lifecycle (device-measured, Stage 2D/4N)" (cold 5.4s / warm 81ms / eager-init / applyVoiceConfig re-apply seam).
+- `design.md`: new §15 "Reader loading states & background-prefetch feedback" (15.1 no new reader spinner — page-level state + TTS pill indicator are the only sanctioned loading affordances; 15.2 manga-screen OCR progress belongs on the FAB trigger itself, never a new reader pill; 15.3 FAB tap = idempotent ensure-queued, cancellation only via OcrQueueScreen).
+- `phase.md`: current-phase-pointer updated to the 2026-09-25 audit (full verdicts + S1–S5 registration + "UNAUTHORIZED — execution needs user sign-off").
+- `implementation-roadmap.md`: §B now "NONE EXECUTABLE" (S1–S5 registered, all unauthorized, S4 flagged as §F-conflict scope decision); §E new S1–S5 block with priority tiers (P1×3, P2×1, P3-scope×1) + execution order + dependency notes; §M new 2026-09-25 audit row.
+- `memory.md`: new 2026-09-25 session block at top of "Recent sessions" (verdicts, file citations, roadmap state) + durable-decision #14 reworded to reflect the new dual-stage conditional feasibility distinction.
+- `state.md`: "Last session" block added (audit verdicts + S1–S5 status) + blocker #2 reworded to "No authorized implementation task — S1–S5 all UNAUTHORIZED."
+- This file: entry above.
+
+**No gates run** (docs-only session, zero source changes — consistent with repo protocol: gates only required after source/build-affecting changes). No device session performed (audit is code-trace + prior-session-measurements, no new measurement was required or requested).
+
 
 **Task (user-authorized):** (1) fix per-page OCR loop resilience in `OcrChapterScanner` (one failed/ hung page must not abort the whole chapter), (2) add "Scan Next Chapter" FAB to MangaScreen.
 

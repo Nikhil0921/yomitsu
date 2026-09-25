@@ -8,6 +8,22 @@
 
 ## Recent sessions (most recent first)
 
+### 2026-09-25 — Full OCR architecture, prefetch & latency system audit (read-only, docs-only)
+
+User master prompt: end-to-end audit of the OCR/prefetch/TTS latency system from page load through speech dispatch, dual-engine topology, queue priorities, prefetch boundaries, and FAB automation. Zero source changes; report + doc updates only.
+
+**Report**: `docs/audits/ocr-prefetch-latency-audit-report.md` (484 lines, file:line-cited, root-cause matrix RC-1..RC-8, step-by-step latency table, current vs proposed mermaid diagrams, S1–S5 actionable checklist + SHOULD-NOT list).
+
+**Verdicts (all code-verified, no new device session)**:
+1. **RC-1 (dominant)**: residual N→N+1 transition latency = GLENS post-upload service wait (med ~9.6s / p90 ~17.9s, Stage 4M ch8475), irreducible client-side. Everything else on the transition path is already <1s via shipped machinery: N+1 image prefetch p0..p3 (09-20, device-verified), reader-open p0 OCR prefetch (Stage 4P), `PrioritizedTaskQueue` (cap 3, HIGH/NORMAL), `OcrCacheStore` (5000-page cap, per-model predicate), eager TTS init (Stage 2D: 5381ms cold → 81ms warm reuse).
+2. **RC-6**: `FastOcrEngine` (local TFLite, `ocr_fast/*.tflite`) is effectively dead on the scan path — `detectionEngine()` is the `UnavailableDetOcrEngine` stub (throws `DetectionUnavailable`) → `scanLocalOrFallback` always redirects to GLENS; assets are gitignored/absent on fresh clones. A full-page `FastOcrEngine.recognizeText` entry point DOES exist and could serve as a <100ms interim-text stage — but that hybrid dual-stage design conflicts with the shipped "local OCR engine reinstatement REJECTED" decision (roadmap §F, −133MB asset removal) and needs an explicit new user scope decision (S4), not silent implementation.
+3. **RC-7 (FAB automation)**: the "Scan Next Chapter" FAB (`MangaScreenModel.scanNextUnreadChapter`) is user-gated only; the smallest architectural hook to automate it = reader-entry auto-enqueue of the next-unread chapter id through `OcrScanManager.enqueue` (~15 lines in `ReaderViewModel`, reusing the `OcrScanJob` service path + idempotent dedupe, so the FAB becomes a harmless manual override). Zero new UI — `observeOcrQueue`/`isNextOcrScanning` spinner already reflects queue state (design.md §15). Gated on S1 (`PrioritizedTaskQueue` +LOW tier) so N+1 background OCR prefetch can't starve TTS.
+4. **RC-5**: `applyVoiceConfig` re-enumerates voices/engines (~66/227 entries) + re-applies `setVoice` on every warm `initialize()` even when prefs unchanged — ~250–305ms/resume (Stage 4N seam; S3).
+5. **S5 gap found**: `GlensOcrEngine.executeRequest` uses raw `HttpURLConnection` per tile, `disconnect()` in `finally` — no connection pooling / keep-alive reuse despite the `Connection: keep-alive` header being set; the 4.9s first-batch upload p90 (Stage 4M) is per-tile handshakes. Fix candidate = shared OkHttp client (already in-app).
+6. **No N+1 OCR prefetch gap explained**: `maybePrefetchReaderOpenOcr` is deliberately skipped while a TTS session is active (ReaderViewModel.kt:416-420) — correct for the ACTIVE chapter (TTS's own lookahead covers it) but leaves N+1 uncovered during auto-advance, which is exactly the auto-advance case TTS hits next. That's the S1+S2 gap.
+
+**Roadmap state after this session**: `implementation-roadmap.md` §B now "NONE EXECUTABLE" — S1–S5 all UNAUTHORIZED pending user scope sign-off (S4 explicitly needs the §F rejection lifted for the NEW dual-stage architecture). `design.md` §15 new (reader loading states / prefetch feedback / manual scan override semantics). `architecture.md` §3.1 (transition prefetch pipeline) + §4.3 (hybrid dual-stage strategy, "NOT shipped") + §5.4 (TTS warm engine lifecycle, device-measured numbers) added. No gates run (docs-only session, zero source changes).
+
 ### 2026-09-21 — Recent tab display sheet & sub-tab toggle (revert of Phase 2 M2 category chips)
 
 Phase 2 M2 (category chip filtering on Updates/History) was the wrong interpretation of "recent tab category toggle" — the user wanted the Library-tab **display-sheet pattern**: a top-bar filter icon opening a display sheet with a "Show tabs" switch. Revert + replace, all in one commit `8732ed49d`:
@@ -244,7 +260,7 @@ All gates green + device smoke PASS. Baseline: Yomitsu rebrand, legacy-OCR remov
 11. **PreferenceGroupCard = one group one surface**; color = surfaceContainerLow (Lowest rejected: invisible in dark schemes); no shadow; no frost-on-frost.
 12. **DB**: two SQLDelight schemas (main 19 migrations + OcrCacheDatabase). Schema change → `.sqm` + `verifySqlDelightMigration`.
 13. **DI**: Injekt only. **Layering**: UI → ScreenModel → Interactor (:domain) → Repo (:domain) → Impl (:data/:app).
-14. **OCR engine chain**: GLENS primary (parallel tiles ×3, single-flight per (chapter,page)), FAST local, OWOCR self-host; LEGACY alias→GLENS. Local-engine reinstatement REJECTED (reverses shipped −133MB removal).
+14. **OCR engine chain**: GLENS primary (parallel tiles ×4, single-flight per (chapter,page)); FAST local (TFLite/LiteRT full-page inference — but dead on the scan path: `UnavailableDetOcrEngine` stub always redirects LEGACY/FAST→GLENS, see 2026-09-25 audit RC-6); OWOCR self-host; LEGACY alias→GLENS. Local-engine reinstatement as PRIMARY engine REJECTED (reverses shipped −133MB removal). **New (audit 2026-09-25)**: hybrid local-first dual-stage (FAST interim text for cold p0 only + GLENS authoritative background upgrade) is CONDITIONALLY FEASIBLE but is a NEW architecture, not the rejected reinstatement — needs explicit user scope decision (roadmap S4, conflicts with §F row).
 15. **OCR cache**: delete-if-outdated DB + 5000-page prune; getPage filters by ocr_model (BUG-004 fixed 09-13, no migration).
 16. **OCR exclusion matcher**: pure :domain, NFKC fold, 35 tests. WORD = rule-token concat equals consecutive-token-run concat; PHRASE = NFKC+lowercase+strip-all-whitespace substring; ZONE = pure-rect page-anchored any scope; COMBINED = rect AND text, opt-in (blank text → pure ZONE). Dialog matchText starts EMPTY (prefill removed — regression lesson).
 

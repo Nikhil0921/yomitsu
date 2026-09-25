@@ -13,28 +13,43 @@ Project:        Yomitsu — Android manga/comic reader, OCR + Read-Aloud TTS, di
 Version:        0.5.4.2 / versionCode 32 (app/build.gradle.kts single source of truth)
 Latest release: v0.5.4.2 (tag 20f4eb746, published 2026-09-20, GitHub Latest, 5 ABI APKs)
 Branch/HEAD:    main @ 8732ed49d — Recent-tab display sheet + sub-tab toggle
-                 (reverted the Phase 2 M2 category-chip misconception); Phase 2
-                 M1/M3/M4 still shipped; prefetch + Phase-2 commits local (not pushed)
+                  (reverted the Phase 2 M2 category-chip misconception); Phase 2
+                  M1/M3/M4 still shipped; prefetch + Phase-2 commits local (not pushed)
 Working tree:   clean
 Current phase:  Phase 2 Yomitsu UI refinement — M2 corrected to display-sheet
-                 pattern (showRecentTabs pref + RecentDisplaySheet + tab-row gate)
+                  pattern (showRecentTabs pref + RecentDisplaySheet + tab-row gate)
 Last gates:     2026-09-21: spotlessCheck + :app:testDebugUnitTest +
-                :app:assembleDebug all BUILD SUCCESSFUL 3m48s (docker -Xmx4g,
-                both volumes); no DB change
+                 :app:assembleDebug all BUILD SUCCESSFUL 3m48s (docker -Xmx4g,
+                 both volumes); no DB change
 Last release:   2026-09-20 v0.5.4.2 released locally (docker -Xmx4g, both volumes):
-                gates green 5m08s (spotless+test+verifySqlDelightMigration),
-                assembleRelease 19m36s, APK cert SHA-256 verified = e486ea51...8968,
-                5 ABI APKs pushed to GitHub (Nikhil0921/yomitsu)
+                 gates green 5m08s (spotless+test+verifySqlDelightMigration),
+                 assembleRelease 19m36s, APK cert SHA-256 verified = e486ea51...8968,
+                 5 ABI APKs pushed to GitHub (Nikhil0921/yomitsu)
 Last gates:     2026-09-20 all green (see last release line)
 Last device:    2026-09-19 STAGE 4L device PASS (SM_M066B wireless: ch8447 p0–15,
                  160×HTTP200, max 4 concurrent tile spans, TTS smoke OK).
                  Q8 Feed auto-pagination device PASS (user-verified 09-19).
+Last session:   2026-09-25 full OCR/prefetch/latency SYSTEM AUDIT (read-only,
+                 docs-only, zero source changes): report
+                 docs/audits/ocr-prefetch-latency-audit-report.md + updates to
+                 architecture.md §3.1/§4.3/§5.4, design.md §15, phase.md,
+                 implementation-roadmap.md §B/§E/§M. No gates run (docs-only).
+                 Verdict: residual N→N+1 latency = GLENS service wait (RC-1,
+                 med 9.6s/p90 17.9s, Stage 4M) — irreducible client-side;
+                 all other transition steps already <1s via shipped
+                 image+OCR prefetch. FAST engine dead on scan path (RC-6);
+                 hybrid local-first dual-stage = NEW scope decision S4
+                 (conflicts with §F rejection, needs user sign-off).
+                 N+1 OCR prefetch gap (RC-7) + LOW queue tier = S1/S2.
+                 applyVoiceConfig re-apply ~250ms/resume = S3. GLENS raw
+                 HttpURLConnection no keep-alive pooling = S5. S1–S5 ALL
+                 UNAUTHORIZED — no implementation task currently open.
 ```
 
 ## Current blockers
 
 1. **Debug-keystore signature mismatch** blocks device pass: `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (09-15). CONFLICTING RECORDS (not reconciled — see memory.md issue #7): known-issue #7 says `yomihon-android-home` volume at `/home/vscode/.android` keeps the key stable; YOMUCHU batch 2 found it NOT mounted/regenerated. VERIFY the mount before any device session; never uninstall `app.yomihon.dev` without a current `.tachibk` backup (data loss). Note: 09-20 v0.5.4.2 release built + published with the stable keystore (SHA-256 e486ea51...8968 verified host + container + APK cert) — release path unaffected; device-session blocker remains.
-2. Nothing else hard-blocked. No authorized implementation task. All stages 0–4P closed.
+2. Nothing else hard-blocked. No authorized implementation task — 2026-09-25 OCR audit closed with S1–S5 registered in implementation-roadmap.md §E, ALL UNAUTHORIZED pending user scope sign-off (S4 additionally requires lifting the §F "local OCR engine reinstatement REJECTED" row for the NEW dual-stage architecture).
 
 ## Active technical gotchas
 
