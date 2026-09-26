@@ -88,7 +88,7 @@ class PrioritizedTaskQueueTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun tasksRunConcurrentlyUpToCapacity() = runTest {
+    fun backgroundTasksLeaveOneSlotReservedForHigh() = runTest {
         val events = mutableListOf<String>()
         val releaseAll = CompletableDeferred<Unit>()
         val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 3)
@@ -102,13 +102,50 @@ class PrioritizedTaskQueueTest {
                 }
             }
         }
-        // All three started without waiting: capacity allows full overlap.
+        // Capacity 3 reserves one slot for HIGH, so background only reaches 2.
         runCurrent()
-        assertEquals(3, events.count { it.endsWith("-start") })
+        assertEquals(2, events.count { it.endsWith("-start") })
 
         releaseAll.complete(Unit)
         jobs.forEach { it.await() }
         assertEquals(6, events.size)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun highPriorityTaskBypassesSaturatedBackgroundQueue() = runTest {
+        val events = mutableListOf<String>()
+        val releaseBackground = CompletableDeferred<Unit>()
+        val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 3)
+
+        val background = (1..2).map { i ->
+            async {
+                queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
+                    events += "normal-$i-start"
+                    releaseBackground.await()
+                    events += "normal-$i-end"
+                }
+            }
+        }
+        advanceUntilIdle()
+        // Background has saturated its ceiling; a queued NORMAL task must wait.
+        val queuedNormal = async {
+            queue.submit(PrioritizedTaskQueue.Priority.NORMAL) { events += "normal-3" }
+        }
+        runCurrent()
+        assertEquals(2, events.size)
+
+        // HIGH takes the reserved slot immediately instead of queueing behind them.
+        val high = async { queue.submit(PrioritizedTaskQueue.Priority.HIGH) { events += "high" } }
+        runCurrent()
+        assertTrue(events.contains("high"), "HIGH must start while background slots are full")
+        assertTrue(!events.contains("normal-3"), "queued NORMAL must still be waiting")
+
+        releaseBackground.complete(Unit)
+        background.forEach { it.await() }
+        queuedNormal.await()
+        high.await()
+        assertTrue(events.contains("normal-3"))
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -118,13 +155,11 @@ class PrioritizedTaskQueueTest {
         val releaseFirst = CompletableDeferred<Unit>()
         val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 2)
 
-        val held = (1..2).map { i ->
-            async {
-                queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
-                    events += "held-$i-start"
-                    releaseFirst.await()
-                    events += "held-$i-end"
-                }
+        val held = async {
+            queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
+                events += "held-1-start"
+                releaseFirst.await()
+                events += "held-1-end"
             }
         }
         advanceUntilIdle()
@@ -134,16 +169,61 @@ class PrioritizedTaskQueueTest {
                 events += "overflow-start"
             }
         }
-        // Capacity 2 is busy: overflow must not have started yet.
+        // Background ceiling for capacity 2 is 1: overflow must not have started yet.
         runCurrent()
         assertTrue(!events.contains("overflow-start"))
 
         releaseFirst.complete(Unit)
-        held.forEach { it.await() }
+        held.await()
         overflow.await()
 
         assertTrue(events.contains("overflow-start"))
-        assertEquals(listOf("held-1-start", "held-2-start"), events.filter { it.endsWith("start") }.take(2))
+        assertEquals(listOf("held-1-start", "overflow-start"), events.filter { it.endsWith("start") })
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun lowPriorityTaskDrainsAfterNormalAndHigh() = runTest {
+        val events = mutableListOf<String>()
+        val holdFirstTask = CompletableDeferred<Unit>()
+        val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 1)
+
+        val first = async {
+            queue.submit(PrioritizedTaskQueue.Priority.LOW) {
+                events += "low-1-start"
+                holdFirstTask.await()
+                events += "low-1-end"
+            }
+        }
+        advanceUntilIdle()
+
+        val normalTask = async {
+            queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
+                events += "normal"
+            }
+        }
+        val highTask = async {
+            queue.submit(PrioritizedTaskQueue.Priority.HIGH) {
+                events += "high"
+            }
+        }
+        val secondLow = async {
+            queue.submit(PrioritizedTaskQueue.Priority.LOW) {
+                events += "low-2"
+            }
+        }
+
+        holdFirstTask.complete(Unit)
+
+        first.await()
+        normalTask.await()
+        highTask.await()
+        secondLow.await()
+
+        assertEquals(
+            listOf("low-1-start", "low-1-end", "high", "normal", "low-2"),
+            events,
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

@@ -143,7 +143,7 @@ internal class TtsPlaybackController(
     private var prefetchJob: Job? = null
 
     /** Pages covered by the current/last prefetch job; guards redundant cancel/restart. */
-    private var prefetchPages: IntRange? = null
+    private var prefetchPages: ClosedRange<Int>? = null
 
     /** ElapsedRealtime marker set in [start]; first successful acquire logs startup latency. */
     private var sessionStartedAtElapsed = 0L
@@ -181,10 +181,10 @@ internal class TtsPlaybackController(
         if (BuildConfig.DEBUG) {
             logcat(LogPriority.DEBUG) {
                 "TTS startup prefetch schedule page=${startPageIndex + 1} " +
-                    "depth=${prefetchDepth()} totalPages=${context.totalPages}"
+                    "budget=${TARGET_SENTENCE_BUFFER} totalPages=${context.totalPages}"
             }
         }
-        schedulePrefetch(context, startPageIndex + 1)
+        scope.launch { schedulePrefetch(context, startPageIndex + 1) }
     }
 
     fun pause() {
@@ -238,14 +238,21 @@ internal class TtsPlaybackController(
 
     /**
      * Reader-open opportunistic OCR for [pageIndex]: best-effort [scanOnDemand]
-     * through the normal cache/in-flight/queue path. A later [start] for the
-     * same page joins the in-flight scan or hits the cache instead of
-     * re-scanning. Failures stay silent; the normal acquisition path reports
-     * its own errors when the user reaches the page.
+     * at HIGH priority through the normal cache/in-flight/queue path, so the
+     * first page the user is on grabs a queue slot ahead of background
+     * OcrScanJob NORMAL scans. A later [start] for the same page joins the
+     * in-flight scan or hits the cache instead of re-scanning. Failures stay
+     * silent; the normal acquisition path reports its own errors when the
+     * user reaches the page.
      */
     fun prefetchReaderOpenPage(ctx: TtsChapterContext, pageIndex: Int): Job {
         return scope.launch {
-            scanOnDemand(ctx, pageIndex, reportFailure = false)
+            scanOnDemand(
+                ctx,
+                pageIndex,
+                priority = OcrScanPriority.HIGH,
+                reportFailure = false,
+            )
         }
     }
 
@@ -500,6 +507,9 @@ internal class TtsPlaybackController(
                 // this, but the load window can keep scans running wastefully.
                 prefetchJob?.cancel()
                 prefetchJob = null
+                // Page indices restart at 0 in the next chapter: drop the coverage record so
+                // its lookahead is not suppressed by the previous chapter's window.
+                prefetchPages = null
                 eventChannel.send(TtsEvent.AdvanceChapter)
                 // Host loads the next chapter and rebinds us via start().
                 return false
@@ -560,7 +570,23 @@ internal class TtsPlaybackController(
         logcat(LogPriority.DEBUG) {
             "TTS OCR ${if (cached != null) "cache hit" else "cache miss"} chapter=${ctx.chapter.id} page=$pageIndex"
         }
-        val result = cached ?: scanOnDemand(ctx, pageIndex) ?: return@withIOContext null
+        val result = cached ?: run {
+            val scanned = withTimeoutOrNull(OCR_ACQUIRE_TIMEOUT_MS) { scanOnDemand(ctx, pageIndex) }
+            if (scanned == null) {
+                logcat(LogPriority.WARN) {
+                    "TTS OCR acquisition null (timeout after ${OCR_ACQUIRE_TIMEOUT_MS}ms or scan failed)" +
+                        " chapter=${ctx.chapter.id} page=$pageIndex"
+                }
+            }
+            scanned
+        } ?: run {
+            // OCR failed/timed out: advance gracefully instead of stopping playback.
+            logcat(LogPriority.WARN) {
+                "TTS OCR timeout page=$pageIndex chapter=${ctx.chapter.id}; advancing gracefully"
+            }
+            fail(TtsError.OcrError)
+            return@withIOContext null
+        }
         val exclusionLookupStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
         if (BuildConfig.DEBUG) {
             logcat(LogPriority.DEBUG) {
@@ -672,11 +698,13 @@ internal class TtsPlaybackController(
     /** Cached-miss path: resolve the bitmap through the shared pipeline, scan, recycle.
      *  Runs on IO: page-list resolution does network via Rx awaitSingle on the calling
      *  thread, and the prefetch job launches on the Main viewModelScope.
-     *  The current page's scan is HIGH priority so it never queues behind prefetch
-     *  or background chapter scans. */
+     *  Callers pick [priority] and [reportFailure] per their context: an active TTS
+     *  page must be HIGH and report failures; opportunistic reader-open/prefetch work
+     *  may run quieter. */
     private suspend fun scanOnDemand(
         ctx: TtsChapterContext,
         pageIndex: Int,
+        priority: OcrScanPriority = OcrScanPriority.HIGH,
         reportFailure: Boolean = true,
     ): OcrPageResult? = try {
         logcat(LogPriority.DEBUG) { "TTS on-demand scan start chapter=${ctx.chapter.id} page=$pageIndex" }
@@ -740,7 +768,7 @@ internal class TtsPlaybackController(
                         if (BuildConfig.DEBUG) {
                             logcat(LogPriority.DEBUG) {
                                 "TTS scanPageOcr await start chapter=${ctx.chapter.id} page=$pageIndex " +
-                                    "startNs=$scanStartNs priority=${if (reportFailure) "HIGH" else "NORMAL"}"
+                                    "startNs=$scanStartNs priority=$priority"
                             }
                         }
                         try {
@@ -748,7 +776,7 @@ internal class TtsPlaybackController(
                                 ctx.chapter.id,
                                 pageIndex,
                                 image,
-                                priority = if (reportFailure) OcrScanPriority.HIGH else OcrScanPriority.NORMAL,
+                                priority = priority,
                             )
                         } finally {
                             if (BuildConfig.DEBUG) {
@@ -756,7 +784,7 @@ internal class TtsPlaybackController(
                                 logcat(LogPriority.DEBUG) {
                                     "TTS scanPageOcr await end chapter=${ctx.chapter.id} page=$pageIndex " +
                                         "endNs=$endNs elapsedNs=${endNs - scanStartNs} " +
-                                        "priority=${if (reportFailure) "HIGH" else "NORMAL"}"
+                                        "priority=$priority"
                                 }
                             }
                         }
@@ -778,44 +806,74 @@ internal class TtsPlaybackController(
         null
     }
 
-    /** Prefetch lookahead depth by speech rate: faster speech needs more runway.
-     *  Remote scans commonly take 20-60s per page while one page of speech at
-     *  1x runs ~10-20s, so the default lookahead is 2 pages, overlapping scans. */
-    private fun prefetchDepth(): Int {
-        val rate = preferences.ttsSpeechRate().get()
-        return when {
-            rate >= 2.5f -> MAX_PREFETCH_DEPTH
-            rate >= 1.5f -> 3
-            else -> 2
-        }
-    }
-
-    private fun schedulePrefetch(ctx: TtsChapterContext, startPageIndex: Int) {
+    /**
+     * Dynamic sentence-budget prefetch: expand lookahead from N+1 until either
+     * (a) the cumulative cached/estimated sentence count reaches [TARGET_SENTENCE_BUFFER],
+     * (b) all remaining pages are exhausted, or
+     * (c) the extended max depth [MAX_PREFETCH_DEPTH_EXTENDED] is reached.
+     *
+     * Two throttles keep lookahead off the queue's critical path:
+     * - On an **uncached** chapter, at most one cold page is queued until the active page is
+     *   actually speaking. Six parallel cold GLENS uploads used to oversubscribe the scan
+     *   queue 2-3x and starve the page being spoken.
+     * - Pages already covered by the running prefetch are dropped instead of re-queued. The
+     *   lookahead window slides by one per page turn, so an exact-range guard never matched
+     *   and every turn re-queued its whole window.
+     *
+     * Remaining pages are prefetched in parallel at [OcrScanPriority.NORMAL]; the scan queue
+     * bounds actual OCR concurrency so this does not block active page speech.
+     */
+    private suspend fun schedulePrefetch(ctx: TtsChapterContext, startPageIndex: Int) {
         if (startPageIndex >= ctx.totalPages) return
-        val targetPages = startPageIndex until minOf(startPageIndex + prefetchDepth(), ctx.totalPages)
-        // Guard: skip if these exact pages are already being prefetched.
-        if (targetPages.isEmpty() || (prefetchPages == targetPages && prefetchJob?.isActive == true)) {
+        val endBound = minOf(startPageIndex + MAX_PREFETCH_DEPTH_EXTENDED, ctx.totalPages)
+        val speaking = mutableState.value.phase == TtsPhase.Playing
+        var accumulated = 0
+        val targetPages = buildList {
+            for (page in startPageIndex until endBound) {
+                add(page)
+                val cached = try {
+                    getCachedPageOcr.await(ctx.chapter.id, page)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                accumulated += cached?.regions?.size ?: MIN_SENTENCES_PER_PAGE
+                if (accumulated >= TARGET_SENTENCE_BUFFER) break
+                // Cold page while the active page has not started speaking: queue it alone.
+                if (cached == null && !speaking) break
+            }
+        }
+
+        if (targetPages.isEmpty()) return
+        // Coverage outlives the job on purpose: a page already handed to the prefetcher is not
+        // queued again for the rest of the session, so a finished-but-still-uncached page cannot
+        // be re-queued on the next re-arm. A page whose prefetch failed is re-scanned on demand
+        // by the main loop, so nothing is lost. resetSession/chapter advance clear this.
+        val covered = prefetchPages
+        val fresh = if (covered == null) targetPages else targetPages.filter { it !in covered }
+        if (fresh.isEmpty()) {
             if (BuildConfig.DEBUG) {
                 logcat(LogPriority.DEBUG) {
-                    "TTS prefetch skip target=${targetPages.first}..${targetPages.last} " +
-                        "current=${prefetchPages?.first ?: "?"}..${prefetchPages?.last ?: "?"} " +
-                        "jobActive=${prefetchJob?.isActive == true}"
+                    "TTS prefetch skip target=${targetPages.first()}..${targetPages.last()} " +
+                        "sentences≈$accumulated (already in flight)"
                 }
             }
             return
         }
-        prefetchPages = targetPages
+        val range = fresh.first()..maxOf(fresh.last(), covered?.endInclusive ?: fresh.last())
+        prefetchPages = range
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
             logcat(LogPriority.DEBUG) {
-                "TTS prefetch start pages=${targetPages.first}..${targetPages.last} " +
+                "TTS prefetch start pages=$range sentences≈$accumulated " +
                     "rate=${preferences.ttsSpeechRate().get()}"
             }
             // Pages prefetch in parallel: remote scans take ~20-60s each while one
             // page of speech lasts ~10-20s, so serial lookahead cannot keep up.
             // The scan queue bounds actual OCR concurrency.
             coroutineScope {
-                targetPages.map { page ->
+                fresh.map { page ->
                     async {
                         val cached = try {
                             getCachedPageOcr.await(ctx.chapter.id, page)
@@ -831,7 +889,12 @@ internal class TtsPlaybackController(
                         try {
                             // Best-effort: failures must not kill the session; the main loop
                             // re-scans and reports its own errors when it reaches this page.
-                            val scanned = scanOnDemand(ctx, page, reportFailure = false)
+                            val scanned = scanOnDemand(
+                                ctx,
+                                page,
+                                priority = OcrScanPriority.NORMAL,
+                                reportFailure = false,
+                            )
                             if (scanned != null) {
                                 logcat(LogPriority.DEBUG) { "TTS prefetch complete page=$page" }
                             } else {
@@ -935,6 +998,11 @@ internal class TtsPlaybackController(
     private companion object {
         const val ADVANCE_CONFIRM_TIMEOUT_MS = 10_000L
         const val RESUME_POLL_MS = 100L
-        const val MAX_PREFETCH_DEPTH = 3
+        const val OCR_ACQUIRE_TIMEOUT_MS = 30_000L
+        const val TARGET_SENTENCE_BUFFER = 40
+        const val MIN_SENTENCES_PER_PAGE = 5
+
+        /** Max lookahead window for dynamic sentence-budget prefetch. */
+        const val MAX_PREFETCH_DEPTH_EXTENDED = 6
     }
 }

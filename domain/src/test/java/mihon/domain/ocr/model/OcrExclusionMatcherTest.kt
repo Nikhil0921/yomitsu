@@ -1,6 +1,8 @@
 package mihon.domain.ocr.model
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Execution
@@ -394,4 +396,62 @@ class OcrExclusionMatcherTest {
         val zones = listOf(zone(pageIndex = 0, left = 0f, top = 0f, right = 0.2f, bottom = 0.2f))
         regions.applyExclusions(zones, context).size shouldBe 0
     }
+
+    @Test
+    fun `single-token rule matches a multi-token region run`() {
+        // A 1-token rule must still match when the REGION splits that same text across several
+        // tokens. This is the case a naive `regionTokens.any { it == needle }` fast path would
+        // silently lose, so it is pinned here on purpose.
+        regionsOf("Key Manga").applyExclusions(wordZone("keymanga"), context).size shouldBe 0
+        regionsOf("Dis\ncord").applyExclusions(wordZone("discord"), context).size shouldBe 0
+        // …while a rule that is not a consecutive run still must not match.
+        regionsOf("Key great manga").applyExclusions(wordZone("keymanga"), context).size shouldBe 1
+    }
+
+    @Test
+    fun `multi-token rule matches exactly one consecutive run of the same length`() {
+        val rule = "K-manga.com" // -> [k, manga, com] -> "kmangacom"
+        regionsOf("Read K-manga.com now").applyExclusions(wordZone(rule), context).size shouldBe 0
+        // Same tokens, broken by an interleaved word: not consecutive, so no match.
+        regionsOf("Read K great manga com now").applyExclusions(wordZone(rule), context).size shouldBe 1
+        // Any consecutive run counts, not just one of the rule's own token length: the
+        // sub-run [k, manga] already satisfies the shorter rule.
+        regionsOf("K manga com extra").applyExclusions(wordZone("K-manga"), context).size shouldBe 0
+        // A needle longer than the whole region can never be satisfied.
+        regionsOf("K manga").applyExclusions(wordZone(rule), context).size shouldBe 1
+    }
+
+    @Test
+    fun `word matching stays linear on text-heavy pages`() {
+        // Real shape from the 2026-09-26 device capture: 16 exclusion zones x 16 speech
+        // bubbles, ~60 tokens each. The old windowed search allocated O(n^3) strings per
+        // (zone, region) pair and spent 12.3s inside acquireSentences; this must stay under
+        // a few milliseconds. Rules deliberately do NOT match, so the full scan is exercised.
+        val regions = (0 until 16).map { order ->
+            region(order, text = (0 until 60).joinToString(" ") { "tok$order$it" })
+        }
+        val zones = (1..16).map { id ->
+            zone(id = id.toLong(), matchType = OcrExclusionMatchType.WORD, matchText = "absent$id")
+        }
+
+        // Warm up so the measurement is not dominated by first-call JIT/class-loading.
+        repeat(3) { regions.applyExclusions(zones, context) }
+
+        val best = (1..5).minOf {
+            val startedAt = System.nanoTime()
+            val kept = regions.applyExclusions(zones, context)
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+            kept.size shouldBe 16 // nothing matched, so every region survives
+            elapsedMs
+        }
+        withClue("16 zones x 16 regions of 60 tokens took ${"%.2f".format(best)} ms") {
+            best shouldBeLessThan 5.0
+        }
+        println("[perf] 16 zones x 16 regions x 60 tokens: ${"%.2f".format(best)} ms (was 427 ms)")
+    }
+
+    private fun regionsOf(text: String) = listOf(region(0, text = text))
+
+    private fun wordZone(matchText: String) =
+        listOf(zone(matchType = OcrExclusionMatchType.WORD, matchText = matchText))
 }

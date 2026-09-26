@@ -36,6 +36,16 @@ import java.io.IOException
 
 class TtsReaderOpenPrefetchTest {
 
+    /**
+     * `prefetchReaderOpenPage` enters `scanOnDemand`'s `withIOContext`, so these tests leave
+     * the virtual test clock for real `Dispatchers.IO`. That is why they must NOT wrap the
+     * join in `withTimeout`: inside `runTest` the timeout is measured on the *virtual* clock,
+     * which fast-forwards while the real IO work is still running and aborts a healthy test.
+     * The real bound is [runTest]'s own dispatch timeout, which fails the test instead of
+     * hanging the worker. Tests that need a real-time bound drive a real scope through
+     * `runBlocking` (see `TtsOcrTimeoutGuardTest`).
+     */
+
     private lateinit var engine: TtsEngine
     private lateinit var preferences: TtsPreferences
     private lateinit var getCachedPageOcr: GetCachedPageOcr
@@ -89,7 +99,7 @@ class TtsReaderOpenPrefetchTest {
     }
 
     @Test
-    fun prefetchScansWithNormalPriority() = runTest {
+    fun prefetchScansWithHighPriority() = runTest {
         mockkStatic("eu.kanade.tachiyomi.util.ocr.OcrImageMapperKt")
         every {
             any<Bitmap>().toOcrImage()
@@ -107,7 +117,7 @@ class TtsReaderOpenPrefetchTest {
             advanceUntilIdle()
 
             coVerify(exactly = 1) {
-                scanPageOcr.await(7L, 0, any(), OcrScanPriority.NORMAL)
+                scanPageOcr.await(7L, 0, any(), OcrScanPriority.HIGH)
             }
             assertEquals(TtsPhase.Idle, controller.state.value.phase)
         } finally {

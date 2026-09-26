@@ -39,6 +39,7 @@ enum class OcrTextOrientation {
 enum class OcrScanPriority {
     HIGH,
     NORMAL,
+    LOW,
 }
 
 data class OcrRegion(

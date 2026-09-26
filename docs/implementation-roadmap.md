@@ -51,14 +51,44 @@ There is exactly ONE.
 
 ```text
 CURRENT AUTHORIZED TASK:
-    NONE EXECUTABLE. (2026-09-25 full OCR/prefetch/latency system audit —
-    read-only, zero source changes — closed with report
-    docs/audits/ocr-prefetch-latency-audit-report.md + doc updates.
-    Newly identified optimization tasks S1–S5 registered in §E below,
-    ALL UNAUTHORIZED pending user scope sign-off. S4 (FAST first-pass /
-    asset repackaging) explicitly conflicts with the shipped
-    −133MB local-OCR-removal rejection in §F — user must lift that
-    rejection for the NEW dual-stage architecture before any code.)
+    UNCACHED COLD-START OCR FALSE-NEGATIVE FIXES A–D 2026-09-26 (user master
+    prompt; diagnosed in docs/audits/uncached-cold-start-diagnostic.md):
+    root cause = Fix-2's 8s withTimeoutOrNull cancelled a *succeeding* HIGH
+    scan queued behind 3 in-flight NORMAL scans (non-preemptive cap-3 queue),
+    then permanently failed the session with TtsError.OcrError. (A) raise
+    OCR_ACQUIRE_TIMEOUT_MS 8000 → 30000 (covers observed 17.6s worst case;
+    fires only on genuine hang). (B) prefetchReaderOpenPage scans at
+    OcrScanPriority.HIGH so reader-open p0 grabs a slot ahead of background
+    NORMAL scans; scanOnDemand priority + reportFailure now independent params.
+    (C) LoadingPage UX already present (no code change). (D) new
+    TtsOcrTimeoutGuardTest regression guard (successful scan must never emit
+    Failed). Gates: spotlessCheck + testDebugUnitTest + :app:assembleDebug all
+    BUILD SUCCESSFUL. DEVICE VERIFIED (partial) 2026-09-26 SM_M066B
+    (.device-pass/logcat-20260926-133534.log, cold uncached ch3285 p0): Fix B
+    reader-open p0 HIGH waitMs=1 (activeSlots=none) + join-in-flight (no dup
+    GLENS); Fix A acquireMs=3142, GLENS HTTP200 uploadMs=4875, OcrError=0,
+    toast=0; cold start→first speech ≈5.97s; 12/12 HTTP200, 0 crashes.
+    CAVEAT: original contended shape (HIGH behind 3 NORMAL, 17.6s) NOT
+    reproduced (Fix B prevents that ordering); 30s-guard boundary unexercised.
+    No commit (user decides).
+
+    S1+S2+S3+S5 LATENCY OPTIMIZATION BATCH 2026-09-25 (user master prompt,
+    authorized S1/S2/S3/S5; S4 explicitly halted/dropped):
+    (S1) PrioritizedTaskQueue LOW tier + OcrScanPriority.LOW mapping +
+    3-tier drain test (~15 lines). (S2) Reader-entry N+1 OCR prefetch:
+    ReaderViewModel.maybePrefetchNextChapterOcr hook at loadChapter
+    success (guards: ttsAutoNextChapter pref, nextChapter != null,
+    non-cellular TRANSPORT_CELLULAR, uncached check via
+    GetCachedChapterIdsOcr, one-shot NextChapterOcrPrefetchGate;
+    OcrScanManager.enqueue reuses service path + idempotent dedupe;
+    FAB stays manual override). (S3) AndroidTtsEngine warm init
+    skip-applyVoiceConfig when (enginePackage, voiceName, languageTag)
+    unchanged vs last-applied (~250ms/resume cut). (S5) GlensOcrEngine
+    raw HttpURLConnection → shared OkHttpClient (connectTimeout 10s,
+    readTimeout 60s, per-tile keep-alive reuse; kills 4.9s first-batch
+    handshake p90; isTransientHttpFailure retry path unchanged).
+    Gates: spotlessCheck + testDebugUnitTest + :app:assembleDebug all
+    BUILD SUCCESSFUL. No commit (user decides).
 
     NEXT-CHAPTER IMAGE PREFETCH PIPELINE 2026-09-20 (user task prompt,
     Background fetch of N+1 first 4 page images after N loads;
@@ -220,47 +250,75 @@ recommended execution sequence; S2 depends on S1; S4 is a scope
 decision (see §F note) and may be dropped without breaking S1–S3/S5.
 
 S1. P1. PrioritizedTaskQueue LOW tier (+OcrScanPriority.LOW mapping).
-      ~15 lines + enum + 1 test. Prereq for S2. Rationale: N+1
-      background OCR prefetch must not starve TTS prefetch (current
-      HIGH/NORMAL cap-3 queue fills on TTS lookahead 2–3 pages,
-      measured 0.615s HIGH wait Stage 4P).
-  ↓
+       ~15 lines + enum + 1 test. Prereq for S2. Rationale: N+1
+       background OCR prefetch must not starve TTS prefetch (current
+       HIGH/NORMAL cap-3 queue fills on TTS lookahead 2–3 pages,
+       measured 0.615s HIGH wait Stage 4P). **EXECUTED 2026-09-25**
+       (user-authorized): LOW added to PrioritizedTaskQueue.Priority;
+       drain order HIGH→NORMAL→LOW; isIdle + restart-guard include LOW;
+       OcrScanPriority.LOW → PrioritizedTaskQueue.Priority.LOW mapping
+       in OcrRepositoryImpl; 3-tier drain test in
+       PrioritizedTaskQueueTest.
+   ↓
 S2. P1. Reader-entry N+1 background OCR prefetch: OcrScanManager.enqueue
-      next-unread id on reader open (ReaderViewModel hook next to
-      nextChapterPrefetchJob; shared cellular + uncached +
-      TTS-auto-next-chapter guards; LOW priority via S1;
-      NextChapterPrefetchGate-style one-shot gate). Automates the
-      "Scan Next Chapter" FAB (MangaScreenModel.scanNextUnreadChapter)
-      without removing it (queue dedupes by chapter id → FAB stays a
-      harmless manual override). Closes RC-7: reader-open p0 prefetch
-      currently skips N+1 when TTS is active (the auto-advance case).
-      Design spec: design.md §15.2/§15.3 (spinner already on FAB via
-      observeOcrQueue; zero new UI).
-  ↓
+       next-unread id on reader open (ReaderViewModel hook next to
+       nextChapterPrefetchJob; shared cellular + uncached +
+       TTS-auto-next-chapter guards; LOW priority via S1;
+       NextChapterPrefetchGate-style one-shot gate). Automates the
+       "Scan Next Chapter" FAB (MangaScreenModel.scanNextUnreadChapter)
+       without removing it (queue dedupes by chapter id → FAB stays a
+       harmless manual override). Closes RC-7: reader-open p0 prefetch
+       currently skips N+1 when TTS is active (the auto-advance case).
+       Design spec: design.md §15.2/§15.3 (spinner already on FAB via
+       observeOcrQueue; zero new UI). **EXECUTED 2026-09-25** (user
+       authorized): ReaderViewModel.maybePrefetchNextChapterOcr called
+       at loadChapter success (next to maybePrefetchNextChapter);
+       guards = ttsAutoNextChapter pref on + nextChapter != null +
+       non-cellular TRANSPORT_CELLULAR + uncached (GetCachedChapterIdsOcr
+       check) + one-shot NextChapterOcrPrefetchGate; OcrScanManager
+       constructor-injected; enqueue runs on viewModelScope.launchIO.
+       New file: NextChapterOcrPrefetchGate.kt.
+   ↓
 S3. P1. applyVoiceConfig skip-on-unchanged-prefs (~250ms/resume;
-      Stage 4N seam; audit RC-5). TtsEngine fast path only;
-      setEnginePackage/shutdown path unchanged.
-  ↓
+       Stage 4N seam; audit RC-5). TtsEngine fast path only;
+       setEnginePackage/shutdown path unchanged. **EXECUTED 2026-09-25**
+       (user authorized): AndroidTtsEngine.initialize() warm path now
+       compares (enginePackage, voiceName, languageTag) against
+       last-applied cache; if unchanged, skips applyVoiceConfig and
+       returns immediately; if changed or cold, runs full
+       applyVoiceConfig and updates the last-applied cache.
+   ↓
 S4. P3 (SCOPE DECISION). FAST local first-pass text for cold p0 +
-      ocr_fast tflite asset repackaging into release (hybrid
-      dual-stage Stage 1; audit §5). CONFLICTS with §F row "Local
-      OCR engine reinstatement REJECTED (reverses shipped −133MB
-      optimization)" — that rejection covered restoring the legacy
-      LOCAL-ONLY pipeline as primary; S4 is a different architecture
-      (FAST interim text under GLENS-authoritative Stage 2, p0 cold
-      only, never mid-chapter). User must explicitly lift the §F
-      rejection for THIS architecture before any code; also add a
-      release-APK size check (ocr_fast encoder+decoder tflites).
-  ↓
+       ocr_fast tflite asset repackaging into release (hybrid
+       dual-stage Stage 1; audit §5). CONFLICTS with §F row "Local
+       OCR engine reinstatement REJECTED (reverses shipped −133MB
+       optimization)" — that rejection covered restoring the legacy
+       LOCAL-ONLY pipeline as primary; S4 is a different architecture
+       (FAST interim text under GLENS-authoritative Stage 2, p0 cold
+       only, never mid-chapter). User must explicitly lift the §F
+       rejection for THIS architecture before any code; also add a
+       release-APK size check (ocr_fast encoder+decoder tflites).
+       **HALTED / DROPPED 2026-09-25** (user master prompt: S4 not
+       authorized; do not restore local TFLite assets, do not modify
+       FastOcrEngine.kt, do not touch APK dependencies or binary
+       assets).
+   ↓
 S5. P2. GLENS connection pooling: GlensOcrEngine.executeRequest raw
-      HttpURLConnection (per-tile connect + disconnect-in-finally,
-      no keep-alive reuse despite the Connection header being set)
-      → shared OkHttp client (already in the app via NetworkHelper /
-      libs.versions.toml 5.4.0). Kills the 4.9s first-batch
-      handshake p90 (Stage 4M upload p90). ~30-line engine change;
-      keep the single retry-on-transient path (OcrRepositoryImpl
-      isTransientHttpFailure) unchanged.
-  ↓
+       HttpURLConnection (per-tile connect + disconnect-in-finally,
+       no keep-alive reuse despite the Connection header being set)
+       → shared OkHttp client (already in the app via NetworkHelper /
+       libs.versions.toml 5.4.0). Kills the 4.9s first-batch
+       handshake p90 (Stage 4M upload p90). ~30-line engine change;
+       keep the single retry-on-transient path (OcrRepositoryImpl
+       isTransientHttpFailure) unchanged. **EXECUTED 2026-09-25**
+       (user authorized): GlensOcrEngine now builds a private
+       OkHttpClient (connectTimeout=CONNECT_TIMEOUT_MS=10s,
+       readTimeout=READ_TIMEOUT_MS=60s) as a lazy field;
+       executeRequest uses OkHttp Request + Call instead of raw
+       HttpURLConnection; disconnect() removed (OkHttp pool handles
+       keep-alive reuse); isTransientHttpFailure retry path in
+       OcrRepositoryImpl unchanged.
+   ↓
 
 NEXT (was): Q3. Recursive dictionary lookup design + implementation
     (REF-CHI-001): design pass first (popup interaction, back-stack,
@@ -518,5 +576,6 @@ fragments (IoU 0.45); mid-page rule adds apply next page.
 | 2026-09-20 | NEXT-CHAPTER IMAGE PREFETCH PIPELINE (user task prompt Phase 2/3, post-v0.5.4.2; built on Phase 1 read-only audit): after active chapter N loads, background-fetch N+1 first 4 page images into ChapterCache via N+1's OWN HttpPageLoader queue (per-chapter isolation — N's active loads/OCR/TTS never preempted). Changes: ReaderPreferences.prefetchNextChapter (key reader_prefetch_next_chapter, default true) + SettingsReaderScreen Reading-group toggle + 2 i18n base strings; NextChapterPrefetchGate (one-shot per active-chapter id, re-arms on chapter change) + 2 unit tests; ChapterLoader.prefetchFirstPages(chapter,4) — no-op for local/downloaded (isLocal guard), remote → loadPage on p0..p3 (ADJACENT auto-enqueue); ReaderViewModel.maybePrefetchNextChapter trigger at loadChapter success (guards: pref on, nextChapter != null, HttpSource, non-cellular TRANSPORT_CELLULAR, gate) + cancel in loadNewChapter + onCleared. TtsPlaybackController ZERO changes. Gates green docker (spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug, 5m46s). DEVICE VERIFIED SM_M066B (unlocked): 3× logcat firings on remote source Asura Scans (A Dragonslayer ch3→4, Villain To Kill ch8→9, + uuid reader-open); N+1 p0..p3 all `internalLoadPage ... status=Ready` in isolated worker; fresh force-stopped process re-fired correctly; disk-cache hits on reopen. Cellular short-circuit NOT exercised live (no root for network-class forcing) — code-reviewed only; ponytail ceiling noted (TRANSPORT_CELLULAR vs NET_CAPABILITY_METERED). UNCOMMITTED — awaiting user commit decision (task says commit; not yet committed). | opencode prefetch-verify session |
 
 | 2026-09-25 | FULL OCR/PREFETCH/LATENCY SYSTEM AUDIT (user master prompt, read-only; zero source changes, docs-only): end-to-end trace page-load→prefetch→OCR→cache→TTS-init→speech-dispatch + dual-engine topology + PrioritizedTaskQueue semantics + ChapterCache bounds + FAB automation. Report: docs/audits/ocr-prefetch-latency-audit-report.md (RC-1..RC-8 root-cause matrix; step latency table w/ file:line citations; current vs proposed mermaid; S1–S5 checklist + SHOULD-NOT list). VERDICTS: residual N→N+1 latency = GLENS service wait (RC-1, med 9.6s/p90 17.9s Stage 4M — irreducible client-side; shipped image+OCR prefetch already hides everything else, all transition steps <1s except GLENS); FAST engine dead on scan path (RC-6, UnavailableDetOcrEngine stub + gitignored ocr_fast assets — hybrid dual-stage Stage 1 conditionally feasible but conflicts with §F shipped −133MB rejection → new scope decision S4); N+1 OCR prefetch gap = reader-open p0 prefetch skipped while TTS active (RC-7, exactly the auto-advance case) → S1 (LOW queue tier) + S2 (reader-entry auto-enqueue via OcrScanManager; FAB stays idempotent manual override, design.md §15); applyVoiceConfig re-apply ~250ms/resume = S3; GLENS raw HttpURLConnection no keep-alive pooling = S5. NO tasks authorized — S1–S5 all UNAUTHORIZED pending user sign-off (§B now "NONE EXECUTABLE"). Docs updated: architecture.md §3.1 (transition prefetch pipeline) + §4.3 (hybrid dual-stage strategy) + §5.4 (TTS warm engine lifecycle, device-measured); design.md §15 (reader loading states / prefetch feedback / manual scan override semantics); phase.md current-pointer updated; memory.md + state.md + history appended. No gates run (docs-only). | opencode OCR-audit session |
+| 2026-09-25 | S1+S2+S3+S5 LATENCY OPTIMIZATION BATCH (user master prompt; S1/S2/S3/S5 authorized, S4 explicitly halted/dropped): (S1) PrioritizedTaskQueue LOW tier: +Priority.LOW, +lowPriorityTasks deque, drain HIGH→NORMAL→LOW, isIdle/restart-guard include LOW, OcrScanPriority.LOW mapping in OcrRepositoryImpl, 3-tier test in PrioritizedTaskQueueTest. (S2) Reader-entry N+1 OCR prefetch: new NextChapterOcrPrefetchGate.kt; ReaderViewModel +ocrScanManager (19th ctor param, Injekt.get()), +getCachedChapterIdsOcr (injectLazy), +nextChapterOcrPrefetchGate, +maybePrefetchNextChapterOcr(chapters) at loadChapter success (guards: ttsAutoNextChapter pref + nextChapter != null + non-cellular TRANSPORT_CELLULAR + uncached via GetCachedChapterIdsOcr + gate; OcrScanManager.enqueue on viewModelScope.launchIO; FAB stays idempotent manual override). (S3) AndroidTtsEngine warm-init skip: +lastAppliedEngine/Voice/Language cache; initialize() warm path compares current prefs vs last-applied, skips applyVoiceConfig when unchanged (~250ms/resume cut), updates cache on full apply. (S5) GlensOcrEngine OkHttp: removed raw HttpURLConnection + java.net.URL imports; +glensHttpClient lazy OkHttpClient field (connectTimeout 10s, readTimeout 60s, keep-alive pool); executeRequest → OkHttp Request + Call; disconnect() removed; isTransientHttpFailure retry unchanged. Gates: spotlessCheck + testDebugUnitTest + :app:assembleDebug all BUILD SUCCESSFUL. No commit. | opencode S1-S5 session |
 
 END OF ROADMAP.

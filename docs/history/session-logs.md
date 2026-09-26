@@ -6662,3 +6662,630 @@ i18n (base only, per rules §8): +6 strings (label_all_categories, category_filt
 Gates: docker vsc-yomihon-e24e3bd7e46d5060e88796634a865cb501faf4766a48662dbc474a380427c674:latest, -Xmx4g, both volumes (gradle-home + android-home at /home/vscode/). spotlessApply ran twice (spotless mangled an import + a comment block once — hand-fixed, final tree clean). spotlessCheck + :app:testDebugUnitTest + :app:assembleDebug all BUILD SUCCESSFUL 3m01s single combined run. No DB change → verifySqlDelightMigration not required. NOT committed (user commit decision, per L-20 precedent). Device verification pending: library list-mode visual + recent-tab chip row + About "What's new" sheet + Support GitHub card on SM_M066B.
 
 Skipped/documented: notification "What's new" action still = browser link (in-app sheet from notification needs Activity host, larger scope). AppUpdateChecker GITHUB_REPO if/else returns same value both branches (pre-existing, flagged not fixed — preview repo split is a product decision).
+---
+
+## 2026-09-25 (Thu) — S1+S2+S3+S5 latency optimization batch (user-authorized; S4 halted)
+
+**Task (user master prompt):** Execute S1, S2, S3, and S5 in exact sequential order from the 2026-09-25 OCR audit. S4 (FAST local first-pass / asset repackaging) explicitly halted — do NOT restore ocr_fast TFLite assets, do NOT modify FastOcrEngine.kt, do NOT touch APK dependencies or binary assets. No silent refactors. No CI/schema breaks.
+
+**S1 — PrioritizedTaskQueue LOW tier:**
+- `PrioritizedTaskQueue.kt`: added `Priority.LOW` enum value; added `lowPriorityTasks` deque; drain order in `processQueue` now `highPriorityTasks.removeFirstOrNull() ?: normalPriorityTasks.removeFirstOrNull() ?: lowPriorityTasks.removeFirstOrNull()`; `isIdle()` and the restart-guard in the task-completion `finally` block now include `lowPriorityTasks`.
+- `OcrModels.kt`: added `OcrScanPriority.LOW`.
+- `OcrRepositoryImpl.kt`: `toQueuePriority()` now maps `OcrScanPriority.LOW → PrioritizedTaskQueue.Priority.LOW`.
+- `PrioritizedTaskQueueTest.kt`: new test `lowPriorityTaskDrainsAfterNormalAndHigh` — capacity 1, submit LOW-1 (held), then NORMAL, HIGH, LOW-2 in that enqueue order; after LOW-1 releases, drain order must be HIGH → NORMAL → LOW-2 (LOW-2 must not start before HIGH or NORMAL complete).
+
+**S2 — Reader-entry N+1 OCR prefetch hook:**
+- New file `NextChapterOcrPrefetchGate.kt` (mirrors `NextChapterPrefetchGate`; one-shot per next-chapter id, re-arms when the active chapter changes).
+- `ReaderViewModel.kt`:
+  - Constructor: added `private val ocrScanManager: OcrScanManager = Injekt.get()` (19th parameter, before `imageSaver`).
+  - Lazy fields: added `private val getCachedChapterIdsOcr: GetCachedChapterIdsOcr by injectLazy()` and `private val nextChapterOcrPrefetchGate = NextChapterOcrPrefetchGate()`.
+  - New method `maybePrefetchNextChapterOcr(chapters: ViewerChapters)`:
+    - Guards: `chapters.nextChapter != null`, `nextChapter.chapter.id != null`, `ttsPreferences.ttsAutoNextChapter().get() == true`, non-cellular (`TRANSPORT_CELLULAR` capability check, same pattern as `maybePrefetchNextChapter`), `nextChapterOcrPrefetchGate.shouldSubmit(nextId)`.
+    - Body: `viewModelScope.launchIO { val cached = getCachedChapterIdsOcr.await(listOf(nextId)); if (nextId !in cached) ocrScanManager.enqueue(listOf(nextId)) }`.
+  - Call site: `maybePrefetchNextChapterOcr(newChapters)` added at the end of `loadChapter()` (after `maybePrefetchNextChapter(newChapters, chapter)`), so it fires on every successful chapter load (reader-open, user-advance, TTS-advance).
+  - The FAB path (`MangaScreenModel.scanNextUnreadChapter`) is unchanged — `OcrScanManager.enqueue` dedupes by chapter id, so the FAB remains a harmless manual override.
+
+**S3 — AndroidTtsEngine skip re-apply on unchanged prefs:**
+- `AndroidTtsEngine.kt`:
+  - Added fields: `lastAppliedEngine`, `lastAppliedVoice`, `lastAppliedLanguage` (all `String?`, initialized `null`).
+  - `applyVoiceConfig()`: after reading `voiceName`/`languageTag` from prefs, captures `lastAppliedEngine = voicePreferences.ttsEnginePackage().get()`, `lastAppliedVoice = voiceName`, `lastAppliedLanguage = languageTag`.
+  - `initialize()` warm path: reads current prefs (`pkg`, `voice`, `lang`); if all three equal the last-applied cache, logs DEBUG "TTS voice config unchanged; skipping re-apply" and returns `true` immediately (no `applyVoiceConfig` call, no voice/engine enumeration). If any differ (or cache is `null` on first warm call), runs full `applyVoiceConfig` and returns `true`.
+
+**S5 — GlensOcrEngine OkHttp keep-alive pooling:**
+- `GlensOcrEngine.kt`:
+  - Removed imports: `java.net.HttpURLConnection`, `java.net.URL`.
+  - Added imports: `okhttp3.OkHttpClient`, `okhttp3.MediaType.Companion.toMediaType`, `okhttp3.RequestBody.Companion.toRequestBody`, `okhttp3.Request`, `java.util.concurrent.TimeUnit`.
+  - Added field: `private val glensHttpClient = OkHttpClient.Builder().connectTimeout(CONNECT_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS).readTimeout(READ_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS).build()` (per-engine-instance client, not the shared `NetworkHelper.client`; isolates the GLENS pool).
+  - `executeRequest()`: replaced raw `HttpURLConnection` POST with `OkHttp Request.Builder().url(LENS_ENDPOINT).header(...).post(payload.toRequestBody(CONTENT_TYPE_PROTOBUF.toMediaType())).build()` + `glensHttpClient.newCall(request).execute()`. All headers preserved (`Content-Type`, `User-Agent`, `X-Goog-Api-Key`, `Connection: keep-alive`, `Sec-Fetch-Mode`, `Sec-Fetch-Dest`). `disconnect()` removed — OkHttp's connection pool handles keep-alive reuse across tiles. `isTransientHttpFailure` retry path in `OcrRepositoryImpl` unchanged.
+
+**Gates (docker `vsc-yomihon-e24e3bd7…`, -Xmx4g, both volumes):**
+- `./gradlew spotlessApply` — BUILD SUCCESSFUL (30s; fixed indentation in `AndroidTtsEngine.initialize()` warm path + `GlensOcrEngine` OkHttp import ordering).
+- `./gradlew spotlessCheck` — BUILD SUCCESSFUL (31s, 86/86 up-to-date).
+- `./gradlew testDebugUnitTest` — BUILD SUCCESSFUL (all tests PASSED; `lowPriorityTaskDrainsAfterNormalAndHigh` new test green).
+- `./gradlew :app:assembleDebug` — BUILD SUCCESSFUL (2m37s; 269 tasks).
+- No DB schema change; no `verifySqlDelightMigration` needed.
+- No commit (user decides).
+
+**Files changed (7 source + 1 new + 1 test):**
+1. `data/src/main/java/mihon/data/ocr/PrioritizedTaskQueue.kt`
+2. `domain/src/main/java/mihon/domain/ocr/model/OcrModels.kt`
+3. `data/src/main/java/mihon/data/ocr/OcrRepositoryImpl.kt`
+4. `data/src/test/java/mihon/data/ocr/PrioritizedTaskQueueTest.kt`
+5. `app/src/main/java/eu/kanade/tachiyomi/ui/reader/ReaderViewModel.kt`
+6. `app/src/main/java/eu/kanade/tachiyomi/ui/reader/NextChapterOcrPrefetchGate.kt` (new)
+7. `app/src/main/java/eu/kanade/tachiyomi/data/tts/AndroidTtsEngine.kt`
+8. `data/src/main/java/mihon/data/ocr/GlensOcrEngine.kt`
+
+**Known limitations / follow-ups:**
+- S2's `maybePrefetchNextChapterOcr` uses the default `OcrScanPriority.NORMAL` (via `OcrChapterScanner` → `scanPageOcr.await` in the WorkManager service path) — the LOW tier from S1 is available for future direct-queue callers but is not wired into S2's enqueue path (service-level scan runs in its own context).
+- S5's per-engine `glensHttpClient` is not the shared `NetworkHelper.client`; a future refactor could inject a shared client via Injekt if cross-engine pooling is desired.
+- Device verification PENDING (needs SM_M066B session; keystore issue #7 still open).
+---
+
+## 2026-09-25 (Thu) — S1+S2+S3+S5 device verification pass (SM_M066B, read-only log analysis)
+
+**Task (user master prompt):** On-device logcat verification of the S1/S2/S3/S5 batch just executed. Strict read-only analysis — zero source changes. Log: `.device-pass/on-device-capture.log` (78.5 MB, 577K+ lines, ON-DEVICE capture via `logcat -v threadtime > /sdcard/on-device-capture.log`). Session content: solo-farming-in-the-tower ch8722→8723→8724→8725, TTS Read-Aloud active, uncached N→N+1 transitions, device clock ≈ host +5h29m (timestamps 09-25 22:52–23:18 device-local).
+
+**Report:** `docs/audits/s1-s5-device-verification-report.md` (new file, full executive-summary table + log snippets + transition-latency table + watch items).
+
+**Verdicts:**
+- **S1 PASS (partial)**: 3-tier drain verified in production logs — HIGH `waitMs=0` ×2 (22:53:23.516 ch8725 p2, 22:53:36.088 ch8725 p2, while a NORMAL held a slot). 1× HIGH `waitMs=6661` at 23:07:11 = cap-full non-preemptive slot-wait (3 NORMALs running, documented RC-3 semantics, not starvation). `low=` depth = 0 in all 193 queue-depth log lines — **LOW tier not in production traffic by design**: S2 routes through the `OcrScanJob` WorkManager service (NORMAL via `scanPageOcr.await` default), not through `PrioritizedTaskQueue.LOW`. Unit test `lowPriorityTaskDrainsAfterNormalAndHigh` covers the drain order.
+- **S2 PASS**: 3× `OcrScanJob` WorkManager starts (22:52:27.210 / 23:07:09.656 / 23:18:24.186), each **120–400 ms** after the matching `Next-chapter image prefetch` log (the `maybePrefetchNextChapterOcr` trigger at `loadChapter` success). Worker SUCCESS ×2 (4f21b33f @22:53:30.240, 74f3164e @23:14:40.154). `NextChapterOcrPrefetchGate` one-shot confirmed: 3 prefetched chapters = exactly 3 OcrScanJob starts, zero duplicate enqueues. Background scan of chapter 8723 (p0–p17, 18 pages, NORMAL priority, 23:07:21→23:10:49) completed SUCCESS 7 min before any TTS advance to it — the RC-7 gap is closed.
+- **S3 PASS**: 8× `TTS voice config unchanged; skipping re-apply` on the main thread (22:52:32.555, 22:53:23.306, 22:53:35.640, 23:06:52.110, 23:07:09.274, 23:15:45.033, 23:17:10.790, 23:18:23.855), each with **zero** `voicesMs`/`enginesMs` enumeration cost (no `TTS voicecfg` line follows the skip). 1× full apply = 257 ms cold path (22:52:30.442: voicesMs=55 + enginesMs=190 + resolveApplyMs=10 + overhead). ~250–260 ms saved per warm resume, as designed (baseline 250–305 ms from Stage 4N).
+- **S5 PASS**: 759/760 tile uploads = HTTP 200; 1× HTTP 500 (23:18:10.742, `scan=86498339 tile=3600`, 31986 ms server stall — see WATCH item 1). `postUploadWaitMs=0` in **all 760 upload lines** (no client-side post-upload wait; `elapsed` = full HTTP round-trip incl. GLENS compute). Cold first-batch (first 10 HTTP 200s time-ordered): **p50=546 ms, max=607 ms** vs Stage 4M baseline first-batch p90 ≈ 4,900 ms (per-tile TLS handshake on raw `HttpURLConnection`) = **~8× handshake-tail reduction**. All 759×HTTP200 sorted: p50=5512, p90=9592, p95=10994, max=15640, avg=5666 ms (includes GLENS server compute).
+
+**WATCH items (new known-issue candidates):**
+1. **HTTP 500 no-retry** (23:18:10, `scan=86498339 tile=3600`): single transient 500 (32 s server stall) did NOT trigger the `isTransientHttpFailure` single-retry in `OcrRepositoryImpl.scanWithGlens`. Likely: the 500 was the last of 4 concurrent tiles; 3 sibling tiles returned 200 (23:17:41–45), so the page result completed with partial regions and the 500 exception was absorbed by the tile-concurrency `awaitAll` path rather than propagating to `scanWithGlens`. Fix candidate: per-tile retry inside `GlensOcrEngine.recognizeTiled` (tile-level, not page-level).
+2. **S1 LOW tier unused in prod**: documented gap, not a regression. Future S2 follow-up could wire the background OCR scan through `PrioritizedTaskQueue.LOW` directly (bypassing the WorkManager service) — new scope decision.
+3. **HIGH queue wait 6661 ms** (23:07:11): expected non-preemptive slot-wait (cap=3, 3 NORMALs running). Not a regression.
+
+**Transition totals (uncached N→N+1, TTS active):** 8722→8724 ≈ 19.6 s; 8724→8725 ≈ 22.4 s; 8725→8723 ≈ 63 s (incl. 6.6 s queue wait + GLENS). Dominant residual = GLENS service compute (RC-1, unchanged — server-side, irreducible client-side). S3 removed ~250 ms from every TTS resume; S5 removed the ~4.3–4.9 s first-batch TLS handshake p90; S2 pre-warms N+1 in the background so GLENS cache is populated before TTS reaches it.
+
+**Docs updated:** `docs/audits/s1-s5-device-verification-report.md` (new); `docs/state.md` (Last device + Last session → device verification PASS); `docs/memory.md` (S1–S5 session block extended with device verdicts + WATCH items). No source changes in this session (strict verification pass). No commit.
+---
+
+## 2026-09-25 (Thu) — TTS resiliency + dynamic prefetch batch (F1–F3)
+
+**Task (user master prompt):** 3 fixes: GlensOcrEngine per-tile retry + reduced read timeout; TtsPlaybackController hard OCR timeout guard; dynamic sentence-budget prefetch.
+
+**Files changed:**
+1. `data/src/main/java/mihon/data/ocr/GlensOcrEngine.kt`
+   - `READ_TIMEOUT_MS` 60_000 → 12_000 (matches GLENS p95=10.9s; timeout now fires before server stall).
+   - New `executeRequestWithRetry(payload, scanId, tileTop)`: retry loop up to `TILE_RETRY_MAX=2` on `IOException`. Logs `[GlensOcrEngine] Tile X retry Y/2 due to Z` at WARN. CancellationException rethrown (no retry on user cancel).
+   - `recognizeTile` now calls `executeRequestWithRetry` instead of `executeRequest` directly.
+   - `recognizeSingle` unchanged (single-request path has no partial-failure risk).
+   - `response.body?.bytes() ?: ByteArray(0)` → `response.body.bytes()` (fixes pre-existing warning; body is non-null in OkHttp 4+).
+   - Import `kotlinx.coroutines.CancellationException` added.
+
+2. `app/src/main/java/eu/kanade/tachiyomi/ui/reader/tts/TtsPlaybackController.kt`
+   - New constants: `OCR_ACQUIRE_TIMEOUT_MS=8000`, `TARGET_SENTENCE_BUFFER=40`, `MIN_SENTENCES_PER_PAGE=5`, `MAX_PREFETCH_DEPTH_EXTENDED=6`.
+   - `acquireSentences`: `scanOnDemand` wrapped in `withTimeoutOrNull(OCR_ACQUIRE_TIMEOUT_MS)`. On timeout/failure → `fail(TtsError.OcrError)` + return null; `runPlayback` exits gracefully instead of wedging in `LoadingPage`.
+   - `schedulePrefetch` refactored to `suspend`: dynamic sentence-budget loop. Iterates from `startPageIndex` up to `min(start+6, totalPages)`, accumulating `cached?.regions?.size ?: MIN_SENTENCES_PER_PAGE` per page; breaks at `TARGET_SENTENCE_BUFFER`. Replaces fixed `prefetchDepth()`.
+   - `prefetchPages` type: `IntRange?` → `ClosedRange<Int>?`.
+   - `prefetchDepth()` and `MAX_PREFETCH_DEPTH` removed.
+   - `start()` wraps `schedulePrefetch` call in `scope.launch` (now suspend).
+   - `runPlayback` call sites already in coroutine context (no change needed).
+   - `prefetchJob` still dispatches at `OcrScanPriority.NORMAL` (via `scanOnDemand` `reportFailure=false`); does not block active page speech.
+
+**Gate results (docker -Xmx4g, both volumes, all PASS):**
+- `spotlessCheck` BUILD SUCCESSFUL (after `spotlessApply` for import order + formatting)
+- `testDebugUnitTest` BUILD SUCCESSFUL (all tests pass, no regressions)
+- `:app:assembleDebug` BUILD SUCCESSFUL
+
+**Design decisions:**
+- `TARGET_SENTENCE_BUFFER=40`: midpoint of user-specified 30–50 range. At 1x rate one page of dialogue (~15 sentences) takes 10–15s; 40 sentences ≈ 2–3 pages of runway.
+- `MIN_SENTENCES_PER_PAGE=5`: conservative lower bound for uncached pages so budget isn't inflated.
+- `MAX_PREFETCH_DEPTH_EXTENDED=6`: hard cap prevents unbounded lookahead for text-light pages.
+- Per-tile retry (not page-level): closes WATCH#1 from S1-S5 device verification where a single 500 was absorbed by `awaitAll` and no retry fired.
+
+**No commit.** S1+S2+S3+S5 batch (same day) also uncommitted.
+
+---
+
+## 2026-09-26 (Sat) — Uncached cold-start OCR false-negative fixes (A–D)
+
+**Task (user master prompt):** fix the uncached-manga TTS cold-start false `OcrError`
+(`tts_error_ocr` toast) diagnosed in `docs/audits/uncached-cold-start-diagnostic.md`.
+Root cause: Fix-2's `withTimeoutOrNull(8000)` cancelled a *succeeding* HIGH
+`scanPageOcr.await` merely queued behind 3 in-flight NORMAL scans (non-preemptive
+cap-3 queue), then permanently failed the session. Four fixes, all executed.
+
+**Files changed:**
+1. `app/.../ui/reader/tts/TtsPlaybackController.kt`
+   - **Fix A**: `OCR_ACQUIRE_TIMEOUT_MS` 8000 → **30_000** (covers the observed
+     17.6s worst-case queue-wait + scan; only fires on genuine hang now).
+   - **Fix B**: `prefetchReaderOpenPage` now calls `scanOnDemand(..., priority =
+     OcrScanPriority.HIGH, reportFailure = false)` — reader-open p0 grabs a queue
+     slot ahead of background NORMAL scans instead of waiting behind them.
+   - `scanOnDemand` signature: `priority: OcrScanPriority = HIGH` +
+     `reportFailure: Boolean = true` are now **independent** params (previously
+     priority was derived from `reportFailure`); KDoc updated.
+2. `app/.../ui/reader/ReaderViewModel.kt`: `maybePrefetchReaderOpenOcr` KDoc updated
+   to "HIGH-priority scan".
+3. `app/.../ui/reader/tts/TtsReaderOpenPrefetchTest.kt`:
+   `prefetchScansWithNormalPriority` → `prefetchScansWithHighPriority` (expects
+   `OcrScanPriority.HIGH`); `prefetchFailureStaysSilent` still passes (reportFailure
+   = false suppresses `fail(OcrError)`). 3/3 PASS.
+4. `app/.../ui/reader/tts/TtsOcrTimeoutGuardTest.kt` (**new**): regression guard
+   `successfulOcrScanDoesNotFailWithOcrError` — a successful scan must reach a
+   spoken terminal phase (Paused at page end, autoTurn off), never `Failed`. 1/1 PASS.
+
+**Fix C (UX):** no code change needed — `TtsPhase.LoadingPage` already renders
+`tts_preparing`/`tts_loading_page` in `TtsPlaybackBar`; raising the guard to 30s keeps
+LoadingPage visible instead of erroring out.
+
+**Fix D test gotcha (important, durable):** `acquireSentences` runs inside
+`withIOContext` → real `Dispatchers.IO`; `runTest`/`advanceUntilIdle` virtual time
+**cannot** advance across it (test hung in Preparing/LoadingPage). Solution: drive the
+controller from a **real** `CoroutineScope(SupervisorJob())` + `runBlocking` +
+bounded `withTimeout`, polling `state.value.phase`. Also required: `mockkStatic`
+`Log` **and** `SystemClock.elapsedRealtime()=0L`; stub `Manga.id`/`Manga.source`
+(`acquireSentences` reads `ctx.manga.id`/`.source`); stub `Bitmap.isRecycled`/`.recycle()`
+(scanOnDemand recycles); stub `TtsPreferences.speechRegionFilterConfig()` +
+`speechCleanupOptions()` directly (rather than the 9 individual pref getters).
+Guard proven: reverting Fix A to 8s and re-running makes the guard test take ~41s and
+fail `Playing/Paused vs Error` — the exact production regression.
+
+**Gate results (docker `vsc-yomihon-e24e3bd7...`, `-Xmx4g`, `~/.gradle` mounted to
+`/home/vscode/.gradle`):**
+- `spotlessApply` + `spotlessCheck` BUILD SUCCESSFUL
+- `testDebugUnitTest` BUILD SUCCESSFUL (TtsOcrTimeoutGuardTest 1/1, TtsReaderOpenPrefetchTest 3/3)
+- `:app:assembleDebug` BUILD SUCCESSFUL
+
+**Build-env correction (durable):** the container Gradle cache lives at
+`GRADLE_USER_HOME=/home/vscode/.gradle`; mounting host `~/.gradle/caches` to
+`/root/.gradle` does NOT resolve deps (JitPack `com.github.arkon.FlexibleAdapter`
+missing). Mount `"$HOME/.gradle":/home/vscode/.gradle`.
+
+**No commit.** S1+S2+S3+S5 and F1–F3 batches (both 09-25) remain uncommitted too.
+
+---
+
+## 2026-09-26 (Sat) — A–D device deployment + cold-start verification (SM_M066B)
+
+**Task (user script + analysis prompt):** install the A–D build on SM_M066B preserving
+data, capture logcat, then verify Fix A/B (cold uncached p0 HIGH enqueue, no 8s
+timeout/OcrError), Fix C/D regressions, and scan for exceptions/anomalies.
+
+**Deployment steps (all completed):**
+1. Pre-install cert check (issue #7 risk): fresh APK cert vs installed `app.yomihon.dev`.
+2. `adb -s 192.168.29.98:5555 install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+   → **Success**, data preserved.
+3. `adb logcat -c` then background `adb logcat -v threadtime > .device-pass/logcat-<ts>.log`
+   → PID 87077; log `.device-pass/logcat-20260926-133534.log`.
+4. Launched via `monkey -p app.yomihon.dev`; `ReaderActivity` resumed.
+
+**KEYSTORE GOTCHA (new durable finding):**
+- My prior gate build (`:app:assembleDebug` with only the gradle cache mounted) produced
+  an APK signed with a **different** key: SHA-256 `1a6fbe75...3881`.
+- Installed app + known-good key = `e486ea51...8968`.
+- `install -r` of the wrong-key APK would have failed `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+- Cause: debug signing reads `/home/vscode/.android/debug.keystore` (app/build.gradle.kts
+  `signingConfigs { named("debug") }`; no `keystore.properties` in repo). Gate builds
+  must mount the `yomihon-android-home` volume at `/home/vscode/.android`.
+- Fix: rebuilt `:app:assembleDebug` with BOTH `"$HOME/.gradle":/home/vscode/.gradle`
+  (deps) AND `yomihon-android-home:/home/vscode/.android` (keystore) → cert
+  `e486ea51...8968` (matches installed); install then succeeded.
+- Volume keystore verified: PKCS12, alias `androiddebugkey`, created 2026-08-22,
+  SHA-256 `E4:86:EA:51...89:68`.
+
+**Device verification (cold uncached ch3285 p0; SM_M066B, Android 16 arm64):**
+Capture window 19:06:14–19:06:40 (~26s; capture process died at host 13:36 — short trace).
+
+- **Fix B VERIFIED**: reader-open prefetch `TTS on-demand scan start chapter=3285 page=0`
+  at 19:06:14.024; `scanPageOcr await ... priority=HIGH`; `OCR queue enqueue ... priority=HIGH
+  activeSlots=none`; `OCR queue start ... priority=HIGH waitMs=1` — p0 HIGH got the queue
+  immediately, ahead of the background NORMAL flood.
+- **Join-in-flight VERIFIED**: TTS start (21.102 cache miss) → `OCR scan joining in-flight
+  scan chapter=3285 page=0` at 23.075 — no duplicate GLENS call for the same page.
+- **Fix A VERIFIED**: `TTS page=0 segmented ... acquireMs=3142`; GLENS
+  `http scan=161024088 status=200 uploadMs=4875 postUploadWaitMs=0`; no 8s cancel.
+  `TTS startup open->first page ready in 3169ms`. **OcrError count = 0; `tts_error_ocr`
+  toast = 0.** p0 = 0 regions (cover) → graceful advance to p1 (no error).
+- **Cold start → first speech ≈ 5.97s** (TTS start 21.072 → p1 dispatch 27.040); first
+  speech was p1 (`p1_s0_c0`, 2 sentences) because p0 had no text.
+- **S5 keep-alive intact**: `postUploadWaitMs=0` ×12.
+- **Exceptions/anomalies**: `CancellationException` = 0, `IOException` = 0 (app-wide);
+  GLENS HTTP **12/12 = 200**; tile drops/retries = 0; app FATAL/crash = 0 (the
+  `AndroidRuntimeException` at 19:05:39 is a launcher *assist action*, not our process);
+  no infinite buffering — clean p0→p1→p2→p3→p4 advance.
+- **Queue waits** (NORMAL N+1..N+6 prefetch only): 1, 2, 1190, 1939, 3873, 3915, 3972,
+  5540ms — none blocked the active page. 5540ms = expected non-preemptive cap-3 slot-wait.
+
+**Honesty caveat (recorded):** this capture shows Fix B working *by construction* — p0's
+HIGH scan enqueued at reader-open *before* TTS prefetch enqueued NORMAL scans
+(`activeSlots=none`), so the original failure shape (HIGH **behind 3 NORMAL**, 6.7s wait +
+5.8s scan = 17.6s) was **not reproduced**. HIGH + no-contention + join-in-flight + no
+OcrError verified; the 30s-guard boundary and the contended path were not exercised.
+A stronger pass needs a longer capture on a fresh chapter with a background `OcrScanJob`
+already running before reader-open (to force contention).
+
+**Capture caveat:** the background `adb logcat` process died ~26s in (host 13:36), so the
+trace is short. No commit. All A–D/F1–F3/S1–S5 work remains uncommitted.
+
+---
+
+## 2026-09-26 (Sat) — READ-ONLY full OCR system resiliency audit
+
+**Task (user master prompt):** read-only diagnostic audit of the OCR Read-Aloud system
+based on reported loading loops, long buffering, LeakCanary heap dumps, and test hangs.
+Hard constraints honored: no git reset/clean/stash, no commit, no core-UI or DB schema
+refactor. **No source files were modified** (verified: `git status -- ':!docs'` shows only
+the pre-existing uncommitted F1–F3/S1–S5/A–D batches).
+
+**Startup protocol:** read rules.md, state.md, memory.md, implementation-roadmap.md,
+audits/uncached-cold-start-diagnostic.md before acting.
+
+**Deliverable:** `docs/audits/full-ocr-system-resiliency-audit.md` (22 KB).
+
+**Evidence base:** `.device-pass/` — on-device-capture.log 78.5MB (primary contention,
+193 OCR queue tasks), logcat-20260925-200614.log 44.6MB (ART GC + 197 TTS dispatches),
+logcat-20260926-133534.log 4.5MB (post-fix cold verify), logcat-leakcanary.log 37.1MB,
+leak-full.log 33.6MB, leak-verify.log 875KB.
+
+### Two premise corrections (important)
+
+1. **No LeakCanary heap dump exists, and the verdict was CLEAN.** LeakCanary is NOT a
+   project dependency (absent from every build.gradle.kts / libs.versions.toml); it was
+   side-loaded 08-28 as `com.squareup.leakcanary.app.yomihon.dev`. Its entire output in the
+   capture is 4 lines: watched `ReaderActivity` + `androidx.lifecycle.ReportFragment` on
+   destroy → "All retained objects have been garbage collected" (CLEAN) → "Found 2 objects
+   retained, not dumping heap yet (app is visible & < 5 threshold)". Never reached the
+   5-object dump threshold. `find . -name '*.hprof'` → nothing. No leak in
+   TtsPlaybackController / ReaderActivity / GlensOcrEngine is evidenced, and the one run
+   that occurred exonerated ReaderActivity.
+2. **The 10–30s stalls are neither a memory problem nor the 30s guard.** OcrError=0,
+   `OCR acquisition null`=0, `page advance to N timed out`=0 across all three OCR/TTS
+   captures. Cause is queue-slot starvation from DUPLICATE scans.
+
+### Root cause of 10–30s buffering stalls (measured, not inferred)
+
+Parsed the queue's own DEBUG instrumentation (`activeSlots=` snapshots + `waitMs=` on
+`OCR queue start`) over 193 tasks in on-device-capture.log:
+- 193 enqueues over 137 distinct (chapter,page) → **56 enqueues (29%) are duplicate scans**
+  of an already-enqueued page; 45 pages enqueued >1× (worst ch8725 p2 = 4×; p19/p22/p31/
+  p34/p36 = 3×). In-flight dedup only collapsed *running* scans (32 joins), never queued ones.
+- 70/193 (36%) enqueued while cap-3 already full; HIGH enqueued-while-full twice.
+- Task-start queue wait: median 1ms, **p90 9233ms, p99 15806ms, max 17169ms**; 25 tasks
+  >8s, 16 >10s. HIGH waits 0/0/6661/818ms (6661ms = cold-start diagnostic's figure).
+- Speech gaps (197 dispatches, 45 page-change gaps): median 1.74s, p90 4.80s, max 23.3s;
+  4 gaps >5s, 1 >10s (the 490s/357s outliers are user pauses/session boundaries).
+
+Mechanism (three compounding, code-verified defects):
+1. `schedulePrefetch` dedup `prefetchPages == range` (TtsPlaybackController.kt:836-844)
+   compares EXACT ranges but the window slides 1/page (26..31→27..32) → never dedups.
+   Measured 51 `prefetch start` vs 1 `prefetch skip`.
+2. `prefetchJob?.cancel()` does NOT cancel submitted queue tasks; `PrioritizedTaskQueue`
+   detaches tasks into `scope.launch` and runs to completion BY DESIGN (:141-147). Orphans
+   hold slots while the new window re-enqueues overlapping pages.
+3. `processQueue` (:127-139) is non-preemptive by design (RC-3) → HIGH waits for the slowest
+   occupant, which per (1)+(2) is often redundant.
+Worked 24.3s example (ch8725 p22 scanned 3×; 3rd queue wait 17169ms) is in the report.
+Bonus: on UNCACHED manga the sentence budget can never bind (6×5=30<40) so every page turn
+always enqueues a full 6-page parallel NORMAL batch.
+
+### Memory / leak analysis (no leak)
+
+ART telemetry (only real memory signal available): 65 post-GC samples, live set sawtooth
+11→55MB returning to a FLAT ~36-38MB baseline, **0** growth-limit (`Clamp`/`Grow heap`)
+events, no upward trend, no cost attributable to Fix 3 lookahead (busiest window 26..36
+shows no step change). High GC cadence + 17-30MB LOS frees = bitmap/OCR buffer churn being
+collected, not retained. **Evidence gap (not a finding):** no `dumpsys meminfo` for the app
+in any capture → native/graphics bitmap heap UNMEASURED.
+
+### S4 local Fast OCR feasibility = NOT VIABLE as offline GLENS fallback
+
+- `FastOcrEngine` (507 lines) fully implemented; `FastVocab.kt` present; litert 2.1.6 present.
+- Models ALREADY packaged in the built APK (`assets/ocr_fast/encoder.tflite` 8.45MB,
+  `decoder.tflite` 12.8MB, `data/…/panel_detector/model.tflite` 2.84MB) → **0-byte APK
+  cost**; ~4.5MB persistent buffers ≈ 25-40MB RSS if resident.
+- **Blocker:** `DetOcrEngine` has only `UnavailableDetOcrEngine` (throws
+  `OcrException.DetectionUnavailable`); `scanLocally` (OcrRepositoryImpl:554-590) always hits
+  it and `scanLocalOrFallback` redirects to GLENS. The CI-restored `panel_detector` model is
+  a YOLO comic-PANEL detector (`PanelDetectionRepositoryImpl.detectPanels` → `Panel`, used by
+  PagerPageHolder) — NOT a text-region detector. **No text-detection model exists in the repo
+  or the CI manifest.**
+- Also JP-vocab garbles English (existing `ponytail:` redirect OcrRepositoryImpl:203-211) →
+  worse than GLENS on the user's actual (English) content.
+- S4 remains user-HALTED; state.md lists "local OCR engine reinstatement" as REJECTED. This
+  audit is documentation only; S4 work needs explicit authorization to lift the lock.
+
+### Other findings
+
+- `awaitAdvanceConfirmation` bounded at 10s → Paused (0 occurrences observed).
+- Only true "indefinite LoadingPage" shape: a run of ZERO-sentence pages loops
+  `acquireSentences` with no speech/error and no wall-clock bound.
+- Fix A turned an 8s error into a 30s silent spinner; Fix C's "Scanning page N…" text was
+  never implemented (bare `CircularProgressIndicator`).
+
+### Docker/test corrections
+
+Two volumes mandatory (host `~/.gradle`→`/home/vscode/.gradle` = GRADLE_USER_HOME/real dep
+cache; `yomihon-android-home`→`/home/vscode/.android` = debug keystore; omitting the latter
+signs stale `1a6fbe75...` vs good `e486ea51...8968` → INSTALL_FAILED_UPDATE_INCOMPATIBLE —
+reconciles old memory issue #7). Always `-Xmx4g`. Test-hang: `acquireSentences` hops to real
+Dispatchers.IO so runTest virtual time can't advance — use real SupervisorJob + runBlocking +
+bounded withTimeout (TtsOcrTimeoutGuardTest pattern); TtsReaderOpenPrefetchTest is safe on
+runTest only because its scanOnDemand is stubbed.
+
+**Findings F1–F9 with severities + suggested verification** are in the report. **No commit.**
+
+---
+
+## 2026-09-26 (Sat) — Read-Aloud architecture recovery: queue saturation + prefetch throttling
+
+**Task (user master prompt):** implement targeted fixes for background queue saturation,
+uncached loading loops, LeakCanary memory retention, and Docker test stability, per
+`docs/audits/full-ocr-system-resiliency-audit.md`. **No commit** (user requirement).
+
+**Premise corrections made before coding (verified against source, not assumed):**
+- **`TtsPlaybackControllerTest.kt` does not exist.** The real TTS test files are
+  `TtsOcrTimeoutGuardTest.kt` (2 tests) and `TtsReaderOpenPrefetchTest.kt` (3 tests).
+- **There is no `TtsPlaybackController.onDestroy()`.** Teardown is
+  `ReaderViewModel.onCleared()`.
+- **The LeakCanary retention was ALREADY FIXED and there is no leak.** The audit proved
+  LeakCanary's verdict was CLEAN and no heap dump was ever written; and
+  `ReaderViewModel.onCleared()` (:367-378) already calls `controller.stop()` (→ `resetSession`
+  cancels + nulls `playbackJob`/`prefetchJob`), `ttsEngine.shutdown()`, and explicitly
+  `ttsEngine.onFocusEvent = null` with a comment naming the exact retention chain
+  ("onFocusEvent would retain the dead controller -> this ViewModel -> destroyed
+  ReaderActivity (~100 MB, LeakCanary 2026-08-28)"). **No code change made for requirement 3**
+  — writing one would be theatre against a bug that does not exist.
+- Requirement 1's "check the local OCR cache before queuing" was **already implemented**
+  (`getCachedPageOcr.await` + `TTS prefetch cache hit` early-return). The real defects were
+  audit F1 and F4.
+
+### Fix 1 — uncached prefetch throttling (`TtsPlaybackController.schedulePrefetch`)
+
+Two throttles, targeting audit F1 + F4:
+```kotlin
+val speaking = mutableState.value.phase == TtsPhase.Playing
+...
+    accumulated += cached?.regions?.size ?: MIN_SENTENCES_PER_PAGE
+    if (accumulated >= TARGET_SENTENCE_BUFFER) break
+    // Cold page while the active page has not started speaking: queue it alone.
+    if (cached == null && !speaking) break
+```
+and coverage-based dedup replacing the exact-range guard that never matched:
+```kotlin
+val covered = prefetchPages
+val fresh = if (covered == null) targetPages else targetPages.filter { it !in covered }
+if (fresh.isEmpty()) { /* skip */ return }
+val range = fresh.first()..maxOf(fresh.last(), covered?.endInclusive ?: fresh.last())
+```
+The launch body now iterates `fresh`, not `targetPages`.
+
+**Coverage deliberately outlives the job** (dropped the `prefetchJob?.isActive` condition) so a
+finished-but-still-uncached page is not re-queued on the next re-arm. Verified necessary: with
+the `isActive` check the new test recorded `[1, 1]` (page 1 queued twice) because the mocked
+cache always misses. A page whose prefetch failed is still re-scanned on demand by the main
+loop, so nothing is lost.
+
+**Matching reset added** in `advanceFromPolicy` `NextChapter`: `prefetchPages = null` beside the
+existing `prefetchJob?.cancel()`. Without it, stale coverage from the previous chapter would
+suppress the new chapter's lookahead, since page indices restart at 0. `resetSession()` already
+cleared it for start/navigation paths.
+
+Effect: on a cold chapter the lookahead is 1 page (N+1) instead of 6 parallel cold GLENS
+uploads — directly removing the 2-3x queue oversubscription the audit measured.
+
+### Fix 2 — HIGH slot reservation (`PrioritizedTaskQueue`)
+
+Targets audit F3 (p90 queue wait 9233 ms, max 17169 ms). This changes the documented RC-3
+non-preemption semantics, which the audit flagged as needing approval; the user authorized it.
+```kotlin
+private val backgroundSlotCeiling: Int =
+    if (maxConcurrentTasks > 1) maxConcurrentTasks - 1 else maxConcurrentTasks
+```
+`processQueue` now admits HIGH before applying that ceiling (HIGH finds the reserved slot
+free), and parks the drain loop when only background work is left and its slots are taken.
+Hard cap is unchanged — total concurrency is still `maxConcurrentTasks`, so HIGH gets a
+guaranteed slot without oversubscription. With `maxConcurrentTasks == 1` nothing is reserved
+and prior behaviour is identical. Trade-off: background concurrency drops 3→2, which the
+audit's 29%-duplicate measurement says costs ~0 real throughput.
+
+### Fix 4 — test dispatcher stabilization
+
+Net **code change: none**; documented the constraint instead. Attempting `withTimeout` around
+the prefetch joins in `TtsReaderOpenPrefetchTest` made 3 tests FAIL with
+`TimeoutCancellationException`: inside `runTest` the timeout runs on the **virtual** clock,
+which fast-forwards while the real `Dispatchers.IO` work is still in flight, aborting healthy
+tests. Reverted and recorded in the test KDoc that the real bound is `runTest`'s own dispatch
+timeout (fails rather than hangs), and that a real-time bound requires a real scope via
+`runBlocking` (the `TtsOcrTimeoutGuardTest` pattern).
+
+### Tests
+
+- `PrioritizedTaskQueueTest`: `tasksRunConcurrentlyUpToCapacity` **replaced** by
+  `backgroundTasksLeaveOneSlotReservedForHigh` (3 background → 2 start), and
+  `queuedTaskStartsWhenCapacityFrees` updated to the cap-2 ceiling of 1. Both previously
+  encoded "background may fill every slot", which requirement 2 deliberately changes — updated
+  to the new contract, not weakened.
+- **New** `highPriorityTaskBypassesSaturatedBackgroundQueue`: 2 NORMAL held + 1 queued NORMAL
+  + 1 HIGH → HIGH starts while background slots are full, queued NORMAL still waiting.
+- **New** `uncachedChapterQueuesOnlyOneLookaheadPageBeforeSpeech` (TtsOcrTimeoutGuardTest):
+  cold 10-page chapter, records every `(page, priority)` scan; asserts NORMAL lookahead is
+  exactly `[1]` and that the active page is still HIGH.
+- Queue suite 7/7 PASS, TTS suite 5/5 PASS.
+
+### Gate results (docker `vsc-yomihon-e24e3bd7...`, `-Xmx4g`, BOTH volumes)
+
+```
+./gradlew spotlessCheck testDebugUnitTest :app:assembleDebug
+BUILD SUCCESSFUL in 3m 40s   (393 actionable tasks: 21 executed, 372 up-to-date)
+```
+- Full unit suite: **391 tests, 0 failures**.
+- One `spotlessCheck` failure along the way (ktlint wanted the new `when` branch wrapped);
+  fixed with `spotlessApply` (37s), then all three gates green.
+- One compile error fixed en route: `covered?.last` does not resolve on `ClosedRange<Int>?`
+  (the `last` property is on `IntRange`); used the canonical `endInclusive`.
+
+**Files changed this session (4):** `PrioritizedTaskQueue.kt`, `TtsPlaybackController.kt`,
+`PrioritizedTaskQueueTest.kt`, `TtsOcrTimeoutGuardTest.kt` (+ a comment-only edit to
+`TtsReaderOpenPrefetchTest.kt`). **No commit.**
+
+---
+
+## 2026-09-26 (Sat) — OcrExclusionMatcher O(n³) → linear (12.3s CPU stall eliminated)
+
+**Task (user master prompt):** optimize `wordMatches` in the OCR exclusion matcher, which the
+2026-09-26 device verification exposed as the cause of a 12.3s stall inside `acquireSentences`.
+**No commit.**
+
+**Path correction:** the prompt named
+`domain/src/main/java/eu/kanade/tachiyomi/ui/reader/ocr/OcrExclusionMatcher.kt`, which does not
+exist. Real path (per rules.md §3, follow the repo's namespaces):
+`domain/src/main/java/mihon/domain/ocr/model/OcrExclusionMatcher.kt`.
+
+### Measured baseline (TDD: test written first, run against the unfixed code)
+
+`word matching stays linear on text-heavy pages` — 16 WORD zones × 16 regions × 60 tokens
+(the exact shape from the device capture):
+```
+16 zones x 16 regions of 60 tokens took 427.47 ms     <- old cubic code, JVM
+```
+On the device the same shape cost **12 258 ms** inside `acquireSentences` (JVM is ~29x faster
+than the phone, plus GC pressure from the allocation churn).
+
+### Rejected the specified single-token fast path — it is NOT behavior-preserving
+
+The prompt asked for `regionTokens.any { it == needleConcat }` when the rule has one token.
+That **loses matches** the current code finds, because a 1-token rule can still be satisfied by
+a *multi-token region run*:
+- region `"Key Manga"` → `[key, manga]`, rule `"KeyManga"` → `"keymanga"`: run of 2 matches.
+- region `"Dis\ncord"` → `[dis, cord]`, rule `"discord"`: run of 2 matches. The existing test
+  documents this as "excluded by design".
+
+Both are existing green tests (`word rule with separator variants still matches`,
+`word rule splits on internal newline tokens`). Requirement 3 (*preserve exact match behavior*)
+therefore takes precedence over requirement 1, and the fast path was **not** used as specified.
+The new test `single-token rule matches a multi-token region run` pins this so the shortcut can
+never be reintroduced.
+
+### Implementation
+
+1. **`containsTokenRun(tokens, needle)`** replaces the nested windowing. Key insight: a run's
+   character length is pinned by the needle, so every candidate start has exactly ONE possible
+   end offset, and a run is valid only if that offset lands on a token boundary. Builds the
+   concatenation once plus a `BooleanArray` of token-end offsets, then tests each start in
+   O(1) + a single `regionMatches`. **O(L + n·m)** instead of O(n³) allocations, and exactly
+   equivalent (all 36 matcher tests pass unchanged, including every separator-tolerance case).
+2. **Hoisted per-region normalization.** `applyExclusions` now computes `region.text
+   .normalizedTokens()` and `normalizeForPhrase(region.text)` once per region instead of once
+   per (zone, region) pair — 16× less NFKC normalization on a 16-zone page. `matchesRegion`,
+   `wordMatches` and `phraseMatches` take the precomputed forms. This was needed to reach the
+   <5 ms target: the `containsTokenRun` fix alone left 6.64 ms, of which the redundant
+   re-normalization was the bulk.
+3. `phraseMatches`' fast path (`contains` on the whitespace-stripped form) and all NFKC /
+   full-width / nakaguro / newline behavior are untouched.
+
+### Result
+
+```
+[perf] 16 zones x 16 regions x 60 tokens: 2.04 ms (was 427 ms)      -> 209x faster
+```
+
+### Tests
+
+- `word matching stays linear on text-heavy pages` — perf guard, best-of-5 after warmup, asserts
+  < 5 ms, and asserts all 16 regions survive (rules deliberately do not match, so the full scan
+  is exercised).
+- `single-token rule matches a multi-token region run` — guards the behavior the rejected fast
+  path would have broken.
+- `multi-token rule matches exactly one consecutive run of the same length` — k>1 rule, a
+  non-consecutive interleaving, a shorter rule satisfied by a sub-run, and a needle longer than
+  the region.
+
+One of my own new assertions was wrong on the first run and was corrected: `"K manga com extra"`
+IS excluded by rule `"K-manga"` because `[k, manga]` is a valid consecutive run — my initial
+claim that "a longer region run must not satisfy a shorter needle" was incorrect. Replaced with
+a needle-longer-than-region case.
+
+### Gate results (docker `vsc-yomihon-e24e3bd7...`, `-Xmx4g`, BOTH volumes)
+
+```
+./gradlew spotlessCheck testDebugUnitTest :app:assembleDebug
+BUILD SUCCESSFUL in 3m 30s   (393 actionable tasks: 13 executed, 380 up-to-date)
+```
+- Full unit suite: **394 tests, 0 failures** (was 391; +3 new matcher tests).
+- `OcrExclusionMatcherTest`: 36/36 PASS.
+- One transient BUILD FAILED on the first attempt: the container installed Android SDK
+  Build-Tools 36 mid-invocation; re-ran clean. Not code-related.
+
+**Files changed (2):** `OcrExclusionMatcher.kt`, `OcrExclusionMatcherTest.kt`. **No commit.**
+
+---
+
+## 2026-09-26 (Sat) — On-device verification of queue-starvation + exclusion-matcher fixes
+
+**Task:** user-authored install/capture script run twice against SM_M066B to verify the
+2026-09-26 read-aloud recovery batch (audit F1/F3/F4) and the OcrExclusionMatcher O(n³) fix.
+**Documentation + device verification only — no source changes, no commit.**
+
+**Pre-flight discipline that mattered (both runs):**
+- Verified the debug keystore cert **before** `install -r`
+  (`apksigner verify --print-certs` → `e486ea51…8968` = known-good). Omitting the
+  `yomihon-android-home` volume silently signs a stale key and breaks `install -r`.
+- **Confirmed the code was actually inside the APK.** First check looked in `classes.dex` and
+  found 0 hits for `containsTokenRun` — because `:domain` classes are packaged into
+  `classes10.dex` (of 38 dex files). Checked all dex files: `classes10.dex: 1 hit`. Without
+  this, a stale build would have silently re-measured the old 12.3s path and produced a
+  false "no improvement" conclusion. Durable: for multi-module apps, verify the fix landed in
+  the APK by scanning every `classes*.dex`, not just the first.
+- Stopped the previous capture (PID 115734) before starting a new one; both captures stayed
+  alive for the whole session (unlike the 09-26 13:35 capture, which died after ~26s).
+
+### Run A — queue starvation + prefetch throttle
+`.device-pass/logcat-20260926-192424.log`, PID 115734, cold uncached ch8807, with
+`OcrScanJob` concurrently scanning ch8806 (genuine queue contention, the case the audit said
+no capture reproduced).
+
+| metric | audit baseline | this run |
+|---|---|---|
+| HIGH queue wait p90 | 9 233 ms | **1 ms** |
+| HIGH worst wait | 17 169 ms | **1 ms** |
+| duplicate enqueues | 56/193 (29%) | **0/17 (0%)** |
+| cold prefetch lookahead | 6 pages | **1 page** (`pages=1..1`, then `2..2`) |
+| prefetch starts / skip | 51 / 1 | **2 / 1** (dedup fires) |
+| cold start → first speech | 5.97s (17.6s worst) | **1.64s** |
+| OcrError | 0 | **0** |
+
+3 `TTS start`, 46 dispatches, `postUploadWaitMs=0`, 0 crashes, 0 app IO/cancel/OOM.
+Speech smooth after p0: median inter-dispatch gap 2.48s, 30 sentences on p1.
+
+### Run B — exclusion matcher
+`.device-pass/logcat-20260926-202430.log`, PID 122431, ch8805, 43 pages, 16 exclusion zones per
+page, 173 dispatches.
+
+Exclusion match, n=30 samples: **min 0.5 ms, median 7.6 ms, p90 17.8 ms, max 74.0 ms**.
+The heavy page that cost **12 258 ms** on the previous build now costs **5.6 ms**.
+Share of `acquireSentences`: **76.9% → 0.1%**. Unit benchmark 427 ms → 2.04 ms (209x).
+Cold start→first speech **2.92s** (target <6s). OcrError/acquisition-null **0**, 0 crashes.
+
+Median acquire budget across all 43 pages — the bottleneck moved from CPU to network, which is
+the intended outcome:
+
+```
+scanPageOcr await     7229.6 ms   91.2%   <- GLENS round-trip (real remote inference)
+openBitmap             476.0 ms    6.0%   <- image download
+toOcrImage              71.3 ms    0.9%
+resolve                 68.7 ms    0.9%
+segment/filter           4.8 ms    0.1%
+exclusion match          7.6 ms    0.1%   <- was 76.9%
+exclusion lookup         4.6 ms    0.1%
+```
+
+GLENS itself healthy: 510 uploads, median 2 670 ms, max 6 619 ms, `postUploadWaitMs=0`.
+Uncached-page `acquireMs` therefore remains 5-12s — genuine remote inference, not a code defect.
+
+### Open follow-ups recorded, NOT implemented (user has not scoped them)
+
+1. The cold throttle pins lookahead to 1 page until first speech. At 2.5x speech rate a page of
+   speech can outrun a ~7s GLENS round-trip with only 1 page of runway. Widening 1→2 after
+   first speech is the natural fix.
+2. Fix C's "Scanning page N…" progress text still does not exist; a 7s wait currently reads as
+   a hang. The 30s guard survived a 12.2s acquire, but the margin is thinner than it looks.
+3. `normalizedTokens()` is still recomputed per page-list call site; now once per region instead
+   of once per (zone, region) pair, which is sufficient, but not hoisted to a per-chapter cache.
+
+**No commit.** All work remains uncommitted for review.

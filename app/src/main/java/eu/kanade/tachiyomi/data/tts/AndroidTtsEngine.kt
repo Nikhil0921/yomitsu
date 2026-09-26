@@ -49,11 +49,25 @@ class AndroidTtsEngine(
 
     private var activeEnginePackage: String = ""
 
+    /** Last applied voice config (engine/voice/language); used to skip redundant re-applies on warm reuse. */
+    private var lastAppliedEngine: String? = null
+    private var lastAppliedVoice: String? = null
+    private var lastAppliedLanguage: String? = null
+
     override var onFocusEvent: ((TtsFocusEvent) -> Unit)? = null
 
     override suspend fun initialize(): Boolean = mutex.withLock {
         val existing = tts.get()
         if (existing != null) {
+            val pkg = voicePreferences.ttsEnginePackage().get()
+            val voice = voicePreferences.ttsVoiceName().get()
+            val lang = voicePreferences.ttsLanguageTag().get()
+            if (pkg == lastAppliedEngine && voice == lastAppliedVoice && lang == lastAppliedLanguage) {
+                if (eu.kanade.tachiyomi.BuildConfig.DEBUG) {
+                    logcat(LogPriority.DEBUG) { "TTS voice config unchanged; skipping re-apply" }
+                }
+                return@withLock true
+            }
             applyVoiceConfig(existing)
             return@withLock true
         }
@@ -225,6 +239,9 @@ class AndroidTtsEngine(
         val cfgStart = if (debug) System.nanoTime() else 0L
         voiceName = voicePreferences.ttsVoiceName().get()
         languageTag = voicePreferences.ttsLanguageTag().get()
+        lastAppliedEngine = voicePreferences.ttsEnginePackage().get()
+        lastAppliedVoice = voiceName
+        lastAppliedLanguage = languageTag
         val voicesStart = if (debug) System.nanoTime() else 0L
         val voices = engine.voices.orEmpty()
         val voicesMs = if (debug) (System.nanoTime() - voicesStart) / 1_000_000 else 0L

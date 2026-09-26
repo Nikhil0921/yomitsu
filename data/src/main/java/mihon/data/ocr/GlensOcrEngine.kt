@@ -2,6 +2,7 @@ package mihon.data.ocr
 
 import android.graphics.Bitmap
 import androidx.core.graphics.scale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -13,11 +14,14 @@ import logcat.LogPriority
 import mihon.domain.ocr.model.OcrBoundingBox
 import mihon.domain.ocr.model.OcrRegion
 import mihon.domain.ocr.model.OcrTextOrientation
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.system.logcat
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 /**
@@ -62,6 +66,10 @@ internal fun tileTopsFor(
  */
 internal class GlensOcrEngine : OcrEngine {
     private val textPostprocessor = TextPostprocessor()
+    private val glensHttpClient = OkHttpClient.Builder()
+        .connectTimeout(CONNECT_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
+        .readTimeout(READ_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
+        .build()
 
     override suspend fun recognizeText(image: Bitmap): String = withContext(Dispatchers.IO) {
         require(!image.isRecycled) { "Input bitmap is recycled" }
@@ -226,7 +234,7 @@ internal class GlensOcrEngine : OcrEngine {
                     }
                 }
             }
-            val responseBytes = executeRequest(payload, scanId, tileTop)
+            val responseBytes = executeRequestWithRetry(payload, scanId, tileTop)
             val parseStart = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
             try {
                 parseResponsePage(responseBytes).regions.map { region ->
@@ -261,6 +269,36 @@ internal class GlensOcrEngine : OcrEngine {
                 }
             }
         }
+    }
+
+    /**
+     * Per-tile retry: a single transient 5xx/429/timeout on one tile must not silently
+     * corrupt the whole page. Retry up to [TILE_RETRY_MAX] times on [IOException]
+     * (covers socket timeouts and HTTP status errors thrown from [executeRequest]).
+     */
+    private fun executeRequestWithRetry(payload: ByteArray, scanId: Int?, tileTop: Int?): ByteArray {
+        var lastException: Exception? = null
+        for (attempt in 0..TILE_RETRY_MAX) {
+            try {
+                return executeRequest(payload, scanId, tileTop)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                lastException = e
+                if (tachiyomi.data.BuildConfig.DEBUG) {
+                    logcat(LogPriority.WARN) {
+                        "[GlensOcrEngine] Tile $tileTop retry ${attempt + 1}/$TILE_RETRY_MAX" +
+                            " due to ${e.message}"
+                    }
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                throw e
+            }
+        }
+        throw IOException(
+            "GLens tile $tileTop failed after ${TILE_RETRY_MAX + 1} attempts",
+            lastException,
+        )
     }
 
     /** Drops seam duplicates from overlapping tiles (same physical text seen twice). */
@@ -362,27 +400,22 @@ internal class GlensOcrEngine : OcrEngine {
                 "OCR(glens) payload scan=$scanId tile=$tileTop payloadBytes=${payload.size}"
             }
         }
-        val connection = (URL(LENS_ENDPOINT).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Content-Type", CONTENT_TYPE_PROTOBUF)
-            setRequestProperty("User-Agent", DEFAULT_USER_AGENT)
-            setRequestProperty("X-Goog-Api-Key", API_KEY)
-            setRequestProperty("Connection", "keep-alive")
-            setRequestProperty("Sec-Fetch-Mode", "no-cors")
-            setRequestProperty("Sec-Fetch-Dest", "empty")
-        }
-
         val httpStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+        val request = Request.Builder()
+            .url(LENS_ENDPOINT)
+            .header("Content-Type", CONTENT_TYPE_PROTOBUF)
+            .header("User-Agent", DEFAULT_USER_AGENT)
+            .header("X-Goog-Api-Key", API_KEY)
+            .header("Connection", "keep-alive")
+            .header("Sec-Fetch-Mode", "no-cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .post(payload.toRequestBody(CONTENT_TYPE_PROTOBUF.toMediaType()))
+            .build()
+        val call = glensHttpClient.newCall(request)
         return try {
-            connection.outputStream.use { output ->
-                output.write(payload)
-            }
+            val response = call.execute()
+            val statusCode = response.code
             val uploadEndNs = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
-
-            val statusCode = connection.responseCode
             if (tachiyomi.data.BuildConfig.DEBUG) {
                 val endNs = System.nanoTime()
                 logcat(LogPriority.DEBUG) {
@@ -395,14 +428,10 @@ internal class GlensOcrEngine : OcrEngine {
                         " postUploadWaitMs=${(endNs - uploadEndNs) / 1_000_000}"
                 }
             }
-            val responseBytes = (if (statusCode in 200..299) connection.inputStream else connection.errorStream)
-                ?.use { input -> input.readBytes() }
-                ?: ByteArray(0)
-
+            val responseBytes = response.body.bytes()
             if (statusCode !in 200..299) {
                 throw IOException("GLens request failed with HTTP $statusCode")
             }
-
             responseBytes
         } finally {
             if (tachiyomi.data.BuildConfig.DEBUG) {
@@ -412,7 +441,6 @@ internal class GlensOcrEngine : OcrEngine {
                         " elapsed=${(endNs - httpStartedAt) / 1_000_000}ms"
                 }
             }
-            connection.disconnect()
         }
     }
 
@@ -1024,7 +1052,8 @@ internal class GlensOcrEngine : OcrEngine {
         private const val DUPLICATE_IOU_THRESHOLD = 0.45f
 
         private const val CONNECT_TIMEOUT_MS = 10_000
-        private const val READ_TIMEOUT_MS = 60_000
+        private const val READ_TIMEOUT_MS = 12_000
+        private const val TILE_RETRY_MAX = 2
 
         private const val WIRE_TYPE_MASK = 0x7
         private const val WIRE_TYPE_LENGTH_DELIMITED = 2

@@ -627,6 +627,7 @@ class OcrRepositoryImpl(
     private fun OcrScanPriority.toQueuePriority(): PrioritizedTaskQueue.Priority = when (this) {
         OcrScanPriority.HIGH -> PrioritizedTaskQueue.Priority.HIGH
         OcrScanPriority.NORMAL -> PrioritizedTaskQueue.Priority.NORMAL
+        OcrScanPriority.LOW -> PrioritizedTaskQueue.Priority.LOW
     }
 
     private suspend fun <T> withActiveOperation(block: suspend () -> T): T {

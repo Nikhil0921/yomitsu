@@ -41,7 +41,11 @@ fun List<OcrRegion>.applyExclusions(
     val active = zones.filter { it.enabled && it.matchesRegionScope(context) }
     if (active.isEmpty()) return this
     return filter { region ->
-        active.none { zone -> matchesRegion(zone, region, context) }
+        // Normalized once per region instead of once per (zone, region) pair: a page with
+        // N zones otherwise re-tokenized the same bubble text N times.
+        val regionTokens = region.text.normalizedTokens()
+        val regionPhrase = normalizeForPhrase(region.text)
+        active.none { zone -> matchesRegion(zone, region, regionTokens, regionPhrase, context) }
     }
 }
 
@@ -67,17 +71,19 @@ private fun OcrExclusionZone.matchesRegionScope(context: ExclusionMatchContext):
 private fun matchesRegion(
     zone: OcrExclusionZone,
     region: OcrRegion,
+    regionTokens: List<String>?,
+    regionPhrase: String?,
     context: ExclusionMatchContext,
 ): Boolean = when (zone.matchType) {
     // Rect rules are page-anchored: pageIndex gates scope, the rect does the work.
     OcrExclusionMatchType.ZONE ->
         zone.pageIndex == context.pageIndex &&
             overlaps(region.boundingBox, zone.boundingBox)
-    OcrExclusionMatchType.WORD -> wordMatches(zone.matchText, region.text)
-    OcrExclusionMatchType.PHRASE -> phraseMatches(zone.matchText, region.text)
+    OcrExclusionMatchType.WORD -> wordMatches(zone.matchText, regionTokens)
+    OcrExclusionMatchType.PHRASE -> phraseMatches(zone.matchText, regionPhrase, regionTokens)
     OcrExclusionMatchType.COMBINED ->
         overlaps(region.boundingBox, zone.boundingBox) &&
-            phraseMatches(zone.matchText, region.text)
+            phraseMatches(zone.matchText, regionPhrase, regionTokens)
 }
 
 /**
@@ -87,15 +93,51 @@ private fun matchesRegion(
  * variants match across rule/region ("KeyManga" ≡ "Key Manga" ≡ [k, manga, com]
  * runs of "K-manga.com").
  */
-private fun wordMatches(ruleText: String?, regionText: String): Boolean {
+private fun wordMatches(ruleText: String?, regionTokens: List<String>?): Boolean {
     val needleTokens = ruleText.normalizedTokens() ?: return false
     if (needleTokens.isEmpty()) return false
-    val regionTokens = regionText.normalizedTokens() ?: return false
-    if (regionTokens.isEmpty()) return false
+    if (regionTokens.isNullOrEmpty()) return false
     val needleConcat = needleTokens.joinToString("")
-    return (1..regionTokens.size).any { size ->
-        regionTokens.windowed(size).any { run -> run.joinToString("") == needleConcat }
+    return containsTokenRun(regionTokens, needleConcat)
+}
+
+/**
+ * True when [needle] equals the concatenation of some consecutive run of [tokens].
+ *
+ * A run's character length is pinned by [needle], so every candidate start has exactly one
+ * possible end offset, and a run is only valid when that offset lands on a token boundary.
+ * Testing one start is therefore O(1) plus a single comparison, instead of windowing every
+ * length and re-joining each window's strings.
+ *
+ * This keeps the original semantics exactly, including the separator-tolerance cases a plain
+ * "does any single token equal the rule" check would lose: rule [keymanga] still matches the
+ * region `Key Manga` (run `[key, manga]`) and `Dis\ncord` (run `[dis, cord]`).
+ */
+private fun containsTokenRun(tokens: List<String>, needle: String): Boolean {
+    val needleLength = needle.length
+    if (needleLength == 0) return false
+
+    // One concatenation of the whole run plus the offsets where each token ends.
+    val concat = StringBuilder()
+    val tokenEnds = IntArray(tokens.size)
+    for (i in tokens.indices) {
+        concat.append(tokens[i])
+        tokenEnds[i] = concat.length
     }
+    val haystack = concat.toString()
+    if (needleLength > haystack.length) return false
+
+    val isTokenEnd = BooleanArray(haystack.length + 1)
+    for (end in tokenEnds) isTokenEnd[end] = true
+
+    var start = 0
+    for (i in tokens.indices) {
+        val end = start + needleLength
+        if (end > haystack.length) break
+        if (isTokenEnd[end] && haystack.regionMatches(start, needle, 0, needleLength)) return true
+        start = tokenEnds[i]
+    }
+    return false
 }
 
 /** NFKC-fold, then split on non-letter/digit runs; tokens keep their case-fold. */
@@ -130,16 +172,19 @@ private fun normalizeForPhrase(text: String?): String? {
  * punctuation noise in BOTH directions ("discord gg" rule matches
  * "Discord. gg / AsuraScans" region; "discord.gg" rule matches "discord gg").
  */
-private fun phraseMatches(ruleText: String?, regionText: String): Boolean {
+private fun phraseMatches(
+    ruleText: String?,
+    regionPhrase: String?,
+    regionTokens: List<String>?,
+): Boolean {
     val needle = normalizeForPhrase(ruleText) ?: return false
     if (needle.isEmpty()) return false
-    val haystack = normalizeForPhrase(regionText) ?: return false
+    val haystack = regionPhrase ?: return false
     if (haystack.contains(needle)) return true
     val needleTokens = ruleText.normalizedTokens() ?: return false
     if (needleTokens.isEmpty()) return false
-    val haystackTokens = regionText.normalizedTokens() ?: return false
-    if (haystackTokens.isEmpty()) return false
-    return haystackTokens.joinToString("").contains(needleTokens.joinToString(""))
+    if (regionTokens.isNullOrEmpty()) return false
+    return regionTokens.joinToString("").contains(needleTokens.joinToString(""))
 }
 
 private fun overlaps(a: OcrBoundingBox, b: OcrBoundingBox): Boolean =

@@ -17,6 +17,7 @@ internal class PrioritizedTaskQueue(
     enum class Priority {
         HIGH,
         NORMAL,
+        LOW,
     }
 
     private data class ActiveTask(
@@ -30,9 +31,18 @@ internal class PrioritizedTaskQueue(
     private val mutex = Mutex()
     private val highPriorityTasks = ArrayDeque<suspend () -> Unit>()
     private val normalPriorityTasks = ArrayDeque<suspend () -> Unit>()
+    private val lowPriorityTasks = ArrayDeque<suspend () -> Unit>()
 
     private var activeTasks = 0
     private var workerJob: Job? = null
+
+    /**
+     * NORMAL/LOW stop one slot short of [maxConcurrentTasks] so a HIGH task always finds a
+     * free slot and never queues behind background `OcrScanJob`/prefetch scans. With a single
+     * slot there is nothing to reserve, so background keeps it.
+     */
+    private val backgroundSlotCeiling: Int =
+        if (maxConcurrentTasks > 1) maxConcurrentTasks - 1 else maxConcurrentTasks
 
     // DEBUG-only: identity of every task currently occupying a queue slot, so a
     // newly-enqueued task can see exactly what is holding the slots it waits for.
@@ -93,6 +103,7 @@ internal class PrioritizedTaskQueue(
             when (priority) {
                 Priority.HIGH -> highPriorityTasks.addLast(task)
                 Priority.NORMAL -> normalPriorityTasks.addLast(task)
+                Priority.LOW -> lowPriorityTasks.addLast(task)
             }
             if (tachiyomi.data.BuildConfig.DEBUG) {
                 logcat(LogPriority.DEBUG) {
@@ -102,7 +113,7 @@ internal class PrioritizedTaskQueue(
             }
             logcat(LogPriority.DEBUG) {
                 "OCR queue depth high=${highPriorityTasks.size} normal=${normalPriorityTasks.size} " +
-                    "active=$activeTasks/$maxConcurrentTasks"
+                    "low=${lowPriorityTasks.size} active=$activeTasks/$maxConcurrentTasks"
             }
             if (workerJob?.isActive != true && activeTasks < maxConcurrentTasks) {
                 workerJob = scope.launch { processQueue() }
@@ -114,7 +125,8 @@ internal class PrioritizedTaskQueue(
 
     suspend fun isIdle(): Boolean {
         return mutex.withLock {
-            activeTasks == 0 && highPriorityTasks.isEmpty() && normalPriorityTasks.isEmpty()
+            activeTasks == 0 && highPriorityTasks.isEmpty() && normalPriorityTasks.isEmpty() &&
+                lowPriorityTasks.isEmpty()
         }
     }
 
@@ -126,10 +138,22 @@ internal class PrioritizedTaskQueue(
                     workerJob = null
                     null
                 } else {
-                    val nextTask = highPriorityTasks.removeFirstOrNull()
-                        ?: normalPriorityTasks.removeFirstOrNull()
-                    if (nextTask != null) activeTasks++
-                    nextTask
+                    val high = highPriorityTasks.removeFirstOrNull()
+                    when {
+                        // HIGH ignores the background ceiling: the slot it would have waited
+                        // for is the one reserved for it.
+                        high != null -> high.also { activeTasks++ }
+                        activeTasks >= backgroundSlotCeiling -> {
+                            // Only background work is left and its slots are taken. Hold the
+                            // reservation for a HIGH task; a finishing task restarts the loop.
+                            workerJob = null
+                            null
+                        }
+                        else -> (
+                            normalPriorityTasks.removeFirstOrNull()
+                                ?: lowPriorityTasks.removeFirstOrNull()
+                            )?.also { activeTasks++ }
+                    }
                 }
             } ?: break
 
@@ -142,7 +166,8 @@ internal class PrioritizedTaskQueue(
                 } finally {
                     val becameIdle = mutex.withLock {
                         activeTasks--
-                        activeTasks == 0 && highPriorityTasks.isEmpty() && normalPriorityTasks.isEmpty()
+                        activeTasks == 0 && highPriorityTasks.isEmpty() && normalPriorityTasks.isEmpty() &&
+                            lowPriorityTasks.isEmpty()
                     }
                     if (becameIdle) {
                         onIdle()
@@ -150,7 +175,10 @@ internal class PrioritizedTaskQueue(
                     mutex.withLock {
                         if (workerJob?.isActive != true &&
                             activeTasks < maxConcurrentTasks &&
-                            (highPriorityTasks.isNotEmpty() || normalPriorityTasks.isNotEmpty())
+                            (
+                                highPriorityTasks.isNotEmpty() || normalPriorityTasks.isNotEmpty() ||
+                                    lowPriorityTasks.isNotEmpty()
+                                )
                         ) {
                             workerJob = scope.launch { processQueue() }
                         }

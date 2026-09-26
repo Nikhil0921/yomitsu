@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
+import eu.kanade.tachiyomi.data.ocr.OcrScanManager
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
@@ -73,6 +74,7 @@ import logcat.LogPriority
 import mihon.domain.ocr.exception.OcrException
 import mihon.domain.ocr.interactor.AddOcrExclusionZone
 import mihon.domain.ocr.interactor.DeleteOcrExclusionZone
+import mihon.domain.ocr.interactor.GetCachedChapterIdsOcr
 import mihon.domain.ocr.interactor.GetCachedPageOcr
 import mihon.domain.ocr.interactor.GetOcrExclusionZones
 import mihon.domain.ocr.interactor.OcrProcessor
@@ -120,6 +122,7 @@ class ReaderViewModel @JvmOverloads constructor(
     private val sourceManager: SourceManager = Injekt.get(),
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadProvider: DownloadProvider = Injekt.get(),
+    private val ocrScanManager: OcrScanManager = Injekt.get(),
     private val imageSaver: ImageSaver = Injekt.get(),
     val readerPreferences: ReaderPreferences = Injekt.get(),
     private val basePreferences: BasePreferences = Injekt.get(),
@@ -185,6 +188,7 @@ class ReaderViewModel @JvmOverloads constructor(
     private val ttsEngine: TtsEngine by injectLazy()
     private val ttsPreferences: TtsPreferences by injectLazy()
     private val getCachedPageOcr: GetCachedPageOcr by injectLazy()
+    private val getCachedChapterIdsOcr: GetCachedChapterIdsOcr by injectLazy()
     private val scanPageOcr: ScanPageOcr by injectLazy()
     private val withOcrScanSession: WithOcrScanSession by injectLazy()
     private val pageSourceResolver: OcrPageSourceResolver by injectLazy()
@@ -210,6 +214,9 @@ class ReaderViewModel @JvmOverloads constructor(
     /** Next-chapter image prefetch: one shot per next-chapter id per session. */
     private var nextChapterPrefetchJob: Job? = null
     private val nextChapterPrefetchGate = NextChapterPrefetchGate()
+
+    /** Next-chapter OCR prefetch: one shot per next-chapter id per session. */
+    private val nextChapterOcrPrefetchGate = NextChapterOcrPrefetchGate()
 
     private fun createTtsController(): TtsPlaybackController {
         val controller = TtsPlaybackController(
@@ -407,8 +414,9 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Reader-open OCR prefetch: once per chapter, best-effort NORMAL scan of
-     * the current page so GLENS work overlaps reader dwell time. Later TTS
+     * Reader-open OCR prefetch: once per chapter, best-effort HIGH-priority scan of
+     * the current page so GLENS work overlaps reader dwell time and the first page
+     * grabs a queue slot ahead of background OcrScanJob NORMAL scans. Later TTS
      * acquisition joins the in-flight scan or hits the cache. Skipped while a
      * TTS session is active (its own prefetch already covers these pages).
      */
@@ -580,6 +588,7 @@ class ReaderViewModel @JvmOverloads constructor(
             }
         }
         maybePrefetchNextChapter(newChapters, chapter)
+        maybePrefetchNextChapterOcr(newChapters)
         return newChapters
     }
 
@@ -616,6 +625,32 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
                 logcat(LogPriority.DEBUG) { "Next-chapter prefetch failed: ${e.message}" }
             }
+        }
+    }
+
+    /**
+     * After the active chapter finishes loading, enqueue the next chapter for a
+     * background OCR scan so its pages are cached by the time TTS auto-advance
+     * crosses the boundary. Best-effort: skipped on cellular, when TTS
+     * auto-advance is off, or when the next chapter is already cached. The
+     * one-shot gate plus the scan manager's idempotent enqueue dedupe keep the
+     * manual FAB a harmless override.
+     */
+    private fun maybePrefetchNextChapterOcr(chapters: ViewerChapters) {
+        val next = chapters.nextChapter ?: return
+        val nextId = next.chapter.id ?: return
+        if (!ttsPreferences.ttsAutoNextChapter().get()) return
+
+        val cm = application.connectivityManager
+        val activeNetwork = cm.activeNetwork
+        val capabilities = activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) return
+        if (!nextChapterOcrPrefetchGate.shouldSubmit(nextId)) return
+
+        viewModelScope.launchIO {
+            val cachedIds = getCachedChapterIdsOcr.await(listOf(nextId))
+            if (nextId in cachedIds) return@launchIO
+            ocrScanManager.enqueue(listOf(nextId))
         }
     }
 
