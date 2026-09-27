@@ -13,6 +13,22 @@ package mihon.domain.ocr.model
  */
 object PpOcrDbPostprocess {
 
+    /**
+     * Share of the shorter box that must overlap vertically for two boxes to be one text line. A
+     * glyph and its neighbour overlap almost completely; two separate lines of a bubble do not.
+     */
+    const val SAME_LINE_VERTICAL_OVERLAP = 0.6f
+
+    /**
+     * Horizontal gap between two boxes, as a multiple of the shorter box's height, still treated as
+     * one line. Tracked display type leaves a gap of a fraction of the glyph height; two separate
+     * bubbles on one row leave several times that.
+     *
+     * ponytail: raise it if adjacent speech bubbles on one row merge on real content; lower it if
+     * letter-spaced words still come apart.
+     */
+    const val SAME_LINE_MAX_GAP_RATIO = 0.8f
+
     fun boxes(
         probability: FloatArray,
         mapWidth: Int,
@@ -25,6 +41,58 @@ object PpOcrDbPostprocess {
         if (probability.size < mapWidth * mapHeight) return emptyList()
         if (imageWidth <= 0f || imageHeight <= 0f) return emptyList()
 
+        val components = components(probability, mapWidth, mapHeight, config)
+        val found = ArrayList<OcrBoundingBox>(components.size)
+        val scaleX = imageWidth / mapWidth
+        val scaleY = imageHeight / mapHeight
+
+        // Group into text lines FIRST, then unclip once per line. Unclipping each component on its
+        // own would grow neighbouring glyphs until they overlap, and by then the gap that said
+        // "same line" is gone — which is why merging on the already-unclipped boxes merged
+        // everything on a row.
+        for (component in mergeSameLineBoxes(components)) {
+            val boxWidth = component.width
+            val boxHeight = component.height
+            val area = boxWidth * boxHeight
+            val perimeter = 2f * (boxWidth + boxHeight)
+            val distance = if (perimeter > 0f) area * config.unclipRatio / perimeter else 0f
+
+            val left = ((component.left - distance) * scaleX).coerceAtLeast(0f)
+            val top = ((component.top - distance) * scaleY).coerceAtLeast(0f)
+            val right = (minOf(component.right + distance, mapWidth.toFloat()) * scaleX)
+                .coerceAtMost(imageWidth)
+            val bottom = (minOf(component.bottom + distance, mapHeight.toFloat()) * scaleY)
+                .coerceAtMost(imageHeight)
+
+            if (right - left < imageWidth * config.minSideFraction) continue
+            if (bottom - top < imageHeight * config.minSideFraction) continue
+
+            val box = OcrBoundingBox(
+                left = left / imageWidth,
+                top = top / imageHeight,
+                right = right / imageWidth,
+                bottom = bottom / imageHeight,
+            )
+            if (box.isValid()) found += box
+        }
+
+        return found
+            .sortedWith(compareBy({ it.top }, { it.left }))
+            .take(config.maxBoxes)
+    }
+
+    /**
+     * The raw connected components, in map coordinates, before any line grouping or unclipping.
+     *
+     * Exposed so the flood fill's own contract stays testable on its own: a white gap between two
+     * blobs really does yield two components, whatever the line grouping does with them afterwards.
+     */
+    fun components(
+        probability: FloatArray,
+        mapWidth: Int,
+        mapHeight: Int,
+        config: PpOcrDbConfig = PpOcrDbConfig(),
+    ): List<OcrBoundingBox> {
         val visited = BooleanArray(mapWidth * mapHeight)
         val queue = IntArray(mapWidth * mapHeight)
         val found = ArrayList<OcrBoundingBox>()
@@ -52,37 +120,67 @@ object PpOcrDbPostprocess {
             }
             if (maxX < 0 || scoreSum / count < config.boxThreshold) continue
 
-            // A pixel at index x covers [x, x + 1] of the scaled page.
-            val boxWidth = (maxX - minX + 1).toFloat()
-            val boxHeight = (maxY - minY + 1).toFloat()
-            val area = boxWidth * boxHeight
-            val perimeter = 2f * (boxWidth + boxHeight)
-            val distance = if (perimeter > 0f) area * config.unclipRatio / perimeter else 0f
-
-            val scaleX = imageWidth / mapWidth
-            val scaleY = imageHeight / mapHeight
-            val left = ((minX - distance) * scaleX).coerceAtLeast(0f)
-            val top = ((minY - distance) * scaleY).coerceAtLeast(0f)
-            val right = (minOf(maxX + 1f + distance, mapWidth.toFloat()) * scaleX)
-                .coerceAtMost(imageWidth)
-            val bottom = (minOf(maxY + 1f + distance, mapHeight.toFloat()) * scaleY)
-                .coerceAtMost(imageHeight)
-
-            if (right - left < imageWidth * config.minSideFraction) continue
-            if (bottom - top < imageHeight * config.minSideFraction) continue
-
+            // A pixel at index x covers [x, x + 1] of the map.
             val box = OcrBoundingBox(
-                left = left / imageWidth,
-                top = top / imageHeight,
-                right = right / imageWidth,
-                bottom = bottom / imageHeight,
+                left = minX.toFloat(),
+                top = minY.toFloat(),
+                right = (maxX + 1).toFloat(),
+                bottom = (maxY + 1).toFloat(),
             )
             if (box.isValid()) found += box
         }
 
         return found
-            .sortedWith(compareBy({ it.top }, { it.left }))
-            .take(config.maxBoxes)
+    }
+
+    /**
+     * Joins boxes that are one text line which DB happened to split into pieces.
+     *
+     * The flood fill above returns one box per connected component, so tracked display type — and a
+     * low [PpOcrDbConfig.binaryThreshold] — can split a single word into one box PER GLYPH. Each
+     * glyph then becomes its own `OcrRegion`, and `SentenceSegmenter` may not merge across regions
+     * (prd F2), so Android TTS spells the word out letter by letter. Measured on hardware: 270 of
+     * 1098 recognition calls were a square `in=48x48` crop, which is exactly what
+     * [PpOcrPreprocess.recognitionInputSize] produces for a box narrower than it is tall. Fixing it
+     * here repairs the OCR rather than papering over bad OCR in the speech layer.
+     *
+     * Two boxes join only when they share a baseline and are close enough to be one line:
+     * a vertical overlap of at least [SAME_LINE_VERTICAL_OVERLAP] of the shorter box,
+     * and a horizontal gap no larger than [SAME_LINE_MAX_GAP_RATIO] of it. The gap
+     * bound is what keeps two bubbles sitting side by side on one row apart.
+     *
+     * Merging is transitive and left-to-right, so a whole word of glyphs collapses to one box.
+     */
+    fun mergeSameLineBoxes(boxes: List<OcrBoundingBox>): List<OcrBoundingBox> {
+        if (boxes.size < 2) return boxes
+        val lines = mutableListOf<MutableList<OcrBoundingBox>>()
+        // Top-to-bottom so a row is contiguous; a box joins the first row it shares a baseline with.
+        for (box in boxes.sortedBy { it.top }) {
+            val row = lines.firstOrNull { candidate -> candidate.any { isSameLine(it, box) } }
+            if (row != null) {
+                row += box
+            } else {
+                lines += mutableListOf(box)
+            }
+        }
+        return lines.map { row ->
+            row.reduce { a, b ->
+                OcrBoundingBox(
+                    left = minOf(a.left, b.left),
+                    top = minOf(a.top, b.top),
+                    right = maxOf(a.right, b.right),
+                    bottom = maxOf(a.bottom, b.bottom),
+                )
+            }
+        }
+    }
+
+    private fun isSameLine(a: OcrBoundingBox, b: OcrBoundingBox): Boolean {
+        val overlap = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
+        val shorterHeight = minOf(a.height, b.height)
+        if (overlap < shorterHeight * SAME_LINE_VERTICAL_OVERLAP) return false
+        val gap = b.left - a.right
+        return gap <= shorterHeight * SAME_LINE_MAX_GAP_RATIO
     }
 
     /** 8-connected flood fill; returns how many pixels are in the blob and leaves them in [queue]. */

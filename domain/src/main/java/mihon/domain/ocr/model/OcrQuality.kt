@@ -21,6 +21,13 @@ data class OcrPageSignals(
     val meanBoxHeightNorm: Float,
     val nonLatinCharRatio: Float,
     val blankOrGarbageRatio: Float,
+    /**
+     * Share of regions holding exactly one character. The per-region counterpart to
+     * [meanCharsPerRegion], which is a page mean and therefore blind to a page that is mostly
+     * single-glyph boxes — the "c-h-a-n-g-e-s" shape, where the recognizer never sees a whole word
+     * and TTS spells each one out (docs/audits/full-ocr-pipeline-audit.md §4, R7).
+     */
+    val singleCharRegionRatio: Float = 0f,
 )
 
 enum class OcrRoute {
@@ -58,6 +65,12 @@ object OcrQualityRouter {
 
     const val MAX_GARBAGE_RATIO = 0.30f
 
+    /**
+     * Above this share of one-character regions, the boxes are glyphs rather than words and the
+     * page is not trustworthy for speech, whatever the mean looks like.
+     */
+    const val MAX_SINGLE_CHAR_REGION_RATIO = 0.30f
+
     fun route(signals: OcrPageSignals, floor: Float = DEFAULT_CONFIDENCE_FLOOR): OcrRoute {
         // Fail safe: a page we cannot score is never trusted.
         if (!signals.confidenceAvailable) return OcrRoute.ESCALATE_CLOUD
@@ -67,6 +80,9 @@ object OcrQualityRouter {
         if (signals.meanBoxHeightNorm < MIN_BOX_HEIGHT_NORM) return OcrRoute.ESCALATE_CLOUD
         if (signals.nonLatinCharRatio > MAX_NON_LATIN_RATIO) return OcrRoute.ESCALATE_CLOUD
         if (signals.blankOrGarbageRatio > MAX_GARBAGE_RATIO) return OcrRoute.ESCALATE_CLOUD
+        if (signals.singleCharRegionRatio > MAX_SINGLE_CHAR_REGION_RATIO) {
+            return OcrRoute.ESCALATE_CLOUD
+        }
         return OcrRoute.ACCEPT_LOCAL
     }
 }
@@ -88,12 +104,14 @@ object OcrQualitySignals {
                 meanBoxHeightNorm = meanBoxHeightNorm,
                 nonLatinCharRatio = 0f,
                 blankOrGarbageRatio = 0f,
+                singleCharRegionRatio = 0f,
             )
         }
 
         val characters = regions.sumOf { it.text.length }
         val nonLatin = regions.sumOf { region -> region.text.count { it.isNonLatin() } }
         val garbage = regions.count { SpeechCleaner.isOcrGarbage(it.text) }
+        val singleChar = regions.count { it.text.trim().length == 1 }
 
         return OcrPageSignals(
             regionCount = regions.size,
@@ -103,6 +121,7 @@ object OcrQualitySignals {
             meanBoxHeightNorm = meanBoxHeightNorm,
             nonLatinCharRatio = if (characters == 0) 0f else nonLatin.toFloat() / characters,
             blankOrGarbageRatio = garbage.toFloat() / regions.size,
+            singleCharRegionRatio = singleChar.toFloat() / regions.size,
         )
     }
 }

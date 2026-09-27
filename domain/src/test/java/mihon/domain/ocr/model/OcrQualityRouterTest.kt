@@ -16,6 +16,7 @@ class OcrQualityRouterTest {
         meanBoxHeightNorm: Float = 0.03f,
         nonLatinCharRatio: Float = 0f,
         blankOrGarbageRatio: Float = 0f,
+        singleCharRegionRatio: Float = 0f,
     ) = OcrPageSignals(
         regionCount = regionCount,
         meanCharConfidence = meanCharConfidence,
@@ -24,6 +25,7 @@ class OcrQualityRouterTest {
         meanBoxHeightNorm = meanBoxHeightNorm,
         nonLatinCharRatio = nonLatinCharRatio,
         blankOrGarbageRatio = blankOrGarbageRatio,
+        singleCharRegionRatio = singleCharRegionRatio,
     )
 
     @Test
@@ -147,5 +149,43 @@ class OcrQualityRouterTest {
         )
 
         OcrQualityRouter.route(signals, 0.8f) shouldBe OcrRoute.ESCALATE_CLOUD
+    }
+
+    /**
+     * A page that is mostly one-character regions is the "c-h-a-n-g-e-s" shape: the recognizer is
+     * handing back per-glyph boxes, so TTS spells every word out. `MIN_CHARS_PER_REGION` cannot see
+     * it — it is a page MEAN, so a page with 12 full lines and 6 lone glyphs still averages well
+     * above 1.5 and passes every gate. Needs a per-region signal.
+     */
+    @Test
+    fun `a page that is mostly single character regions escalates`() {
+        OcrQualityRouter.route(
+            signals(meanCharsPerRegion = 10f, singleCharRegionRatio = 0.5f),
+            0.8f,
+        ) shouldBe OcrRoute.ESCALATE_CLOUD
+    }
+
+    @Test
+    fun `a page with a couple of short regions is still accepted`() {
+        OcrQualityRouter.route(
+            signals(meanCharsPerRegion = 10f, singleCharRegionRatio = 0.1f),
+            0.8f,
+        ) shouldBe OcrRoute.ACCEPT_LOCAL
+    }
+
+    @Test
+    fun `single char region ratio is derived from the regions`() {
+        val regions = listOf(
+            OcrPageText("Hello there", 0.98f),
+            OcrPageText("General Kenobi", 0.96f),
+            OcrPageText("a", 0.99f),
+            OcrPageText("I", 0.99f),
+        )
+
+        OcrQualitySignals.from(
+            regions = regions,
+            confidenceAvailable = true,
+            meanBoxHeightNorm = 0.04f,
+        ).singleCharRegionRatio shouldBe 0.5f
     }
 }

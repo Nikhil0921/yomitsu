@@ -61,6 +61,47 @@ internal fun tileTopsFor(
 }
 
 /**
+ * Drops seam duplicates from the tiled path: the same physical text recognised twice, once by each
+ * of the two tiles that overlap at that band.
+ *
+ * Text-aware on purpose. A tall page is cut into 13 tiles with 20% vertical overlap, so a bubble
+ * inside an overlap band is recognised twice at two different tile-local positions - and a bubble
+ * the boundary cuts comes back from each tile as a *partial* box whose IoU against the other can sit
+ * far below any threshold. The previous rule compared IoU alone (>= 0.45) and so failed in both
+ * directions: real duplicates survived and were spoken twice, while a small bubble nested inside a
+ * large one crossed the threshold with completely different text and was deleted outright. Measured
+ * on device: 7-10 regions dropped per 13-tile page, and the survivors were partial duplicates.
+ *
+ * The rule is the one the speech layer already uses - identical normalised text in boxes that
+ * overlap - so the cache stores what Read-Aloud will actually say, and the same words in two
+ * separate bubbles still both survive.
+ *
+ * @return the surviving regions in their original order, keeping the earliest copy.
+ */
+internal fun dedupeTileSeamDuplicates(regions: List<OcrRegion>): List<OcrRegion> {
+    if (regions.size < 2) return regions
+    val kept = ArrayList<OcrRegion>(regions.size)
+    for (region in regions) {
+        val key = seamDuplicateKey(region)
+        val duplicate = kept.any { existing ->
+            seamDuplicateKey(existing) == key && boxesOverlap(existing.boundingBox, region.boundingBox)
+        }
+        if (!duplicate) kept.add(region)
+    }
+    return kept
+}
+
+/** Whitespace-collapsed, case-folded: a seam copy of a line differs only in spacing noise. */
+private fun seamDuplicateKey(region: OcrRegion): String =
+    region.text.trim().replace(SEAM_WHITESPACE_RUN, " ").lowercase()
+
+private val SEAM_WHITESPACE_RUN = Regex("\\s+")
+
+/** Strict AABB overlap on normalised coordinates. */
+private fun boxesOverlap(a: OcrBoundingBox, b: OcrBoundingBox): Boolean =
+    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
+/**
  * OCR engine backed by Google Lens online OCR.
  * Extracts plain text from text-layout boxes in the protobuf response.
  */
@@ -109,7 +150,7 @@ internal class GlensOcrEngine : OcrEngine {
                 recognizeSingle(image, scanId)
             }
             val postStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
-            val ordered = dedupeOverlapping(regions).mapIndexed { index, region ->
+            val ordered = dedupeTileSeamDuplicates(regions).mapIndexed { index, region ->
                 region.copy(order = index)
             }
             if (tachiyomi.data.BuildConfig.DEBUG) {
@@ -299,28 +340,6 @@ internal class GlensOcrEngine : OcrEngine {
             "GLens tile $tileTop failed after ${TILE_RETRY_MAX + 1} attempts",
             lastException,
         )
-    }
-
-    /** Drops seam duplicates from overlapping tiles (same physical text seen twice). */
-    private fun dedupeOverlapping(regions: List<OcrRegion>): List<OcrRegion> {
-        val sorted = regions.sortedBy { it.boundingBox.top }
-        val kept = mutableListOf<OcrRegion>()
-        for (region in sorted) {
-            val duplicate = kept.any { existing ->
-                intersectionOverUnion(existing.boundingBox, region.boundingBox) >=
-                    DUPLICATE_IOU_THRESHOLD
-            }
-            if (!duplicate) kept.add(region)
-        }
-        return kept
-    }
-
-    private fun intersectionOverUnion(a: OcrBoundingBox, b: OcrBoundingBox): Float {
-        val intersectWidth = minOf(a.right, b.right) - maxOf(a.left, b.left)
-        val intersectHeight = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-        if (intersectWidth <= 0f || intersectHeight <= 0f) return 0f
-        val intersection = intersectWidth * intersectHeight
-        return intersection / (a.width * a.height + b.width * b.height - intersection)
     }
 
     override fun close() = Unit
@@ -1049,7 +1068,6 @@ internal class GlensOcrEngine : OcrEngine {
         private const val MIN_TILE_HEIGHT = 1000
         private const val TILE_OVERLAP_RATIO = 0.2f
         private const val TILE_CONCURRENCY = 4
-        private const val DUPLICATE_IOU_THRESHOLD = 0.45f
 
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 12_000

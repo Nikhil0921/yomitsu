@@ -169,7 +169,10 @@ class PpOcrDbPostprocessTest {
         blob(probability, 32, x0 = 4, y0 = 8, x1 = 12, y1 = 11, value = 0.9f)
         blob(probability, 32, x0 = 14, y0 = 8, x1 = 22, y1 = 11, value = 0.9f)
 
-        PpOcrDbPostprocess.boxes(probability, 32, 32, 320f, 320f).size shouldBe 2
+        // The flood fill's own contract, pinned on its own: two components. boxes() then groups
+        // same-line components into one line box, which is the fix for the per-glyph regions
+        // behind "c-h-a-n-g-e-s" (audit R7).
+        PpOcrDbPostprocess.components(probability, 32, 32).size shouldBe 2
     }
 
     @Test
@@ -201,5 +204,95 @@ class PpOcrDbPostprocessTest {
         // Upper-left, upper-right, then the lower one.
         boxes[0].left shouldBeLessThan boxes[1].left
         boxes[1].top shouldBeLessThan boxes[2].top
+    }
+    // ---- same-line box merging (audit R7: "c-h-a-n-g-e-s") ----
+
+    private fun box(left: Float, top: Float, right: Float, bottom: Float) =
+        OcrBoundingBox(left = left, top = top, right = right, bottom = bottom)
+
+    /**
+     * DB emits one box per connected component, so tracked display type and a low binary threshold
+     * split a single word into one box PER GLYPH. Each glyph then becomes its own OcrRegion, and
+     * SentenceSegmenter is forbidden from merging regions (prd F2), so Android TTS spells the word
+     * out. Measured on hardware: 270 of 1098 recognition calls were a square `in=48x48` crop, which
+     * is what recognitionInputSize produces for a box narrower than it is tall.
+     */
+    @Test
+    fun `glyph boxes on one baseline merge into a single line box`() {
+        val glyphs = listOf(
+            box(0.10f, 0.20f, 0.13f, 0.24f),
+            box(0.145f, 0.20f, 0.175f, 0.24f),
+            box(0.19f, 0.205f, 0.225f, 0.245f),
+        )
+
+        val merged = PpOcrDbPostprocess.mergeSameLineBoxes(glyphs)
+
+        merged.size shouldBe 1
+        merged.single().left shouldBe 0.10f
+        merged.single().right shouldBe 0.225f
+    }
+
+    @Test
+    fun `a whole line box is left alone`() {
+        val line = listOf(box(0.10f, 0.20f, 0.40f, 0.24f))
+
+        PpOcrDbPostprocess.mergeSameLineBoxes(line) shouldBe line
+    }
+
+    @Test
+    fun `two bubbles on one row stay separate`() {
+        val bubbles = listOf(
+            box(0.05f, 0.20f, 0.20f, 0.26f),
+            box(0.60f, 0.20f, 0.75f, 0.26f),
+        )
+
+        PpOcrDbPostprocess.mergeSameLineBoxes(bubbles).size shouldBe 2
+    }
+
+    @Test
+    fun `boxes stacked on different lines stay separate`() {
+        val lines = listOf(
+            box(0.10f, 0.20f, 0.40f, 0.24f),
+            box(0.10f, 0.30f, 0.40f, 0.34f),
+        )
+
+        PpOcrDbPostprocess.mergeSameLineBoxes(lines).size shouldBe 2
+    }
+
+    @Test
+    fun `merging keeps reading order after the sort`() {
+        val boxes = listOf(
+            box(0.10f, 0.30f, 0.13f, 0.34f),
+            box(0.145f, 0.30f, 0.18f, 0.34f),
+            box(0.10f, 0.10f, 0.30f, 0.14f),
+        )
+
+        val merged = PpOcrDbPostprocess.mergeSameLineBoxes(boxes)
+
+        merged.size shouldBe 2
+        merged.first().top shouldBe 0.10f
+        merged.last().top shouldBeLessThanOrEqual 0.30f
+    }
+
+    @Test
+    fun `boxes are merged by the end-to-end path`() {
+        val width = 200
+        val height = 100
+        val scale = width / 1000f
+        val probability = FloatArray(width * height)
+        // Two glyph-sized blobs on one baseline, far enough apart that neither alone would be
+        // recognised as a word.
+        blob(probability, width, x0 = 10, y0 = 60, x1 = 22, y1 = 76, value = 0.9f)
+        blob(probability, width, x0 = 28, y0 = 60, x1 = 40, y1 = 76, value = 0.9f)
+
+        val boxes = PpOcrDbPostprocess.boxes(
+            probability = probability,
+            mapWidth = width,
+            mapHeight = height,
+            imageWidth = 1000f,
+            imageHeight = 500f,
+        )
+
+        boxes.size shouldBe 1
     }
 }
