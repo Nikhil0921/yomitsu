@@ -24,8 +24,24 @@ data class SpeechClassificationConfig(
 
 object SpeechRegionClassifier {
 
-    private val INTERJECTION = Regex("^[A-Z' ]{2,6}$")
     private val HAS_TERMINAL = Regex("[.!?…。！？]$")
+
+    /**
+     * Environmental onomatopoeia — sounds, not words. Membership is lexical because shape cannot
+     * do the job: "BOOM!!" and "STOP!!" are both short, uppercase and emphatic, and only one of
+     * them is a sound. Anything absent from these sets stays DIALOGUE, which is the safe
+     * direction — a missed sound effect is read aloud, a misfiled word is silently skipped.
+     */
+    private val SOUND_EFFECT_TOKENS = setOf(
+        "BAM", "BANG", "BOOM", "CLANG", "CLANK", "CRACK", "CRASH", "KABOOM", "POW", "SHLASH",
+        "SLAM", "SMACK", "THUD", "RUMBLE", "WHAM", "ZAP",
+        "BZZT", "CLNK", "CLUNK", "CREAK", "GRR", "SHRR", "VROOM", "ZZZT",
+    )
+
+    /** Non-word vocalizations: screams, grunts, hisses. Also lexical, same reason. */
+    private val EXPRESSION_TOKENS = setOf(
+        "AAAH", "AAARGH", "AARGH", "AHH", "EEE", "EEK", "HMM", "HRM", "MM", "OOF", "SHH", "TSK", "UGH",
+    )
 
     /**
      * Regions are classified in stored order; never re-sorted. Classification is
@@ -49,11 +65,13 @@ object SpeechRegionClassifier {
         val wideThin = bbox.width > 0.55f && bbox.height < 0.12f && !HAS_TERMINAL.containsMatchIn(text)
         if (config.classifyNarration && wideThin) return SpeechRegionType.NARRATION
 
-        val isUpper = letters.uppercase() == letters
-        val hasEmphasis = text.any { it in "!?‼⁇⁉⁈" }
-        if (isUpper && letters.length <= 8 && hasEmphasis) return SpeechRegionType.SOUND_EFFECT
-        if (isUpper && INTERJECTION.matches(text)) return SpeechRegionType.EXPRESSION
-        if (INTERJECTION.matches(text)) return SpeechRegionType.EXPRESSION
+        // Non-speech is only ever claimed for upper-case text, matching the long-standing gate:
+        // a lower-case "boom!!" is a character saying "boom", not a drawn sound.
+        val upperLetters = letters.uppercase()
+        if (upperLetters == letters) {
+            if (upperLetters in SOUND_EFFECT_TOKENS) return SpeechRegionType.SOUND_EFFECT
+            if (upperLetters in EXPRESSION_TOKENS) return SpeechRegionType.EXPRESSION
+        }
 
         return SpeechRegionType.DIALOGUE
     }
@@ -67,6 +85,10 @@ fun dominantScript(letters: String): SpeechScript {
     var cjk = 0
     var other = 0
     for (c in letters) {
+        if (c.isFullWidthLatin()) {
+            latin++
+            continue
+        }
         when (Character.UnicodeBlock.of(c)) {
             null, Character.UnicodeBlock.BASIC_LATIN,
             Character.UnicodeBlock.LATIN_1_SUPPLEMENT,
@@ -91,3 +113,10 @@ fun dominantScript(letters: String): SpeechScript {
         else -> SpeechScript.OTHER
     }
 }
+
+/**
+ * Full-width Ａ-Ｚ / ａ-ｚ. These are still Latin: counting them as "other" made every full-width
+ * English bubble look foreign, so `skipForeignScript` deleted the whole bubble.
+ */
+private fun Char.isFullWidthLatin(): Boolean =
+    code in 0xFF21..0xFF3A || code in 0xFF41..0xFF5A

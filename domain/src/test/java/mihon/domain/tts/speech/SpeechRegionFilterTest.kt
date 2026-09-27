@@ -74,6 +74,35 @@ class SpeechRegionFilterTest {
     }
 
     @Test
+    fun `short emphatic dialogue survives default config`() {
+        val regions = listOf(
+            region(0, "OK"),
+            region(1, "I'm ready"),
+            region(2, "STOP!!"),
+            region(3, "WHAT??"),
+        )
+        SpeechRegionFilter.filterRegions(regions, classificationConfig, defaultConfig)
+            .map { it.text } shouldContainExactly listOf("OK", "I'm ready", "STOP!!", "WHAT??")
+    }
+
+    @Test
+    fun `english bubble with stray kana is not dropped as foreign script`() {
+        val regions = listOf(
+            region(0, "I'm ready こんにちは"),
+            region(1, "OK."),
+        )
+        SpeechRegionFilter.filterRegions(regions, classificationConfig, defaultConfig)
+            .map { it.text } shouldContainExactly listOf("I'm ready こんにちは", "OK.")
+    }
+
+    @Test
+    fun `full-width latin bubble is not dropped as foreign script`() {
+        val regions = listOf(region(0, "ＯＫ"), region(1, "Ｐlease"))
+        SpeechRegionFilter.filterRegions(regions, classificationConfig, defaultConfig)
+            .map { it.text } shouldContainExactly listOf("ＯＫ", "Ｐlease")
+    }
+
+    @Test
     fun `order preserved`() {
         val regions = listOf(
             region(0, "First."),

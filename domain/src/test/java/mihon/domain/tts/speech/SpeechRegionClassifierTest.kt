@@ -53,6 +53,34 @@ class SpeechRegionClassifierTest {
     }
 
     @Test
+    fun `short uppercase words are dialogue not expressions`() {
+        listOf("OK", "NO", "YES", "HI", "MEH", "RUN", "HELP").forEach {
+            SpeechRegionClassifier.classify(region(it), config) shouldBe SpeechRegionType.DIALOGUE
+        }
+    }
+
+    @Test
+    fun `emphatic uppercase dialogue is dialogue not sfx`() {
+        listOf("STOP!!", "WHAT??", "NO!", "OKAY!", "WAIT!").forEach {
+            SpeechRegionClassifier.classify(region(it), config) shouldBe SpeechRegionType.DIALOGUE
+        }
+    }
+
+    @Test
+    fun `environmental onomatopoeia is sound effect`() {
+        listOf("BAM", "CRASH", "RUMBLE", "THUD", "SLAM", "KABOOM").forEach {
+            SpeechRegionClassifier.classify(region(it), config) shouldBe SpeechRegionType.SOUND_EFFECT
+        }
+    }
+
+    @Test
+    fun `lowercase short text is never sfx or expression`() {
+        listOf("ok", "no", "stop!", "what?").forEach {
+            SpeechRegionClassifier.classify(region(it), config) shouldBe SpeechRegionType.DIALOGUE
+        }
+    }
+
+    @Test
     fun `symbol-only and blank regions are decorative`() {
         SpeechRegionClassifier.classify(region("!!!"), config) shouldBe SpeechRegionType.DECORATIVE
         SpeechRegionClassifier.classify(region("***"), config) shouldBe SpeechRegionType.DECORATIVE

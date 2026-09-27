@@ -8,7 +8,11 @@ class OcrPreferences(
     private val preferenceStore: PreferenceStore,
 ) {
 
-    fun ocrModel() = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+    // GLENS is the default: LEGACY is deprecated and is no longer offered in the model
+    // selector, so defaulting to it would leave a fresh install showing a value the user
+    // cannot pick. LEGACY already resolves to the GLENS engine, so this changes no behaviour
+    // for anyone who still has LEGACY stored.
+    fun ocrModel() = preferenceStore.getEnum("pref_ocr_model", OcrModel.GLENS)
 
     fun autoOcrOnDownload() = preferenceStore.getBoolean("auto_ocr_on_download", false)
 

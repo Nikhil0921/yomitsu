@@ -119,7 +119,7 @@ class TextPostprocessor {
     private fun postprocessSingleLine(text: String): String {
         if (text.isEmpty()) return text
 
-        val hasJapaneseText = text.any { it.isJapaneseScript() }
+        val japaneseDominant = isJapaneseDominant(text)
 
         stringBuilder.setLength(0)
         stringBuilder.ensureCapacity(text.length)
@@ -141,8 +141,10 @@ class TextPostprocessor {
                 val nextNonWhitespace = text.getOrNull(nextIndex)
                 val shouldKeepSpace = previousNonWhitespace != null &&
                     nextNonWhitespace != null &&
-                    !previousNonWhitespace.isJapaneseScript() &&
-                    !nextNonWhitespace.isJapaneseScript()
+                    (
+                        !japaneseDominant ||
+                            (!previousNonWhitespace.isJapaneseScript() && !nextNonWhitespace.isJapaneseScript())
+                        )
 
                 if (shouldKeepSpace && (stringBuilder.isEmpty() || stringBuilder.last() != ' ')) {
                     stringBuilder.append(' ')
@@ -202,8 +204,11 @@ class TextPostprocessor {
                 }
             }
 
-            if (hasJapaneseText) {
-                // Convert half-width to full-width only when the sentence contains Japanese text.
+            if (japaneseDominant) {
+                // Convert half-width to full-width only when the sentence is Japanese. A single
+                // stray kana/kanji in an English bubble must not flip the whole line: full-width
+                // Latin makes the bubble's dominant script OTHER, which the speech filter then
+                // drops as foreign — silently losing the whole bubble.
                 val code = char.code
                 if (code < HALF_TO_FULL_TABLE.size) {
                     stringBuilder.append(HALF_TO_FULL_TABLE[code])
@@ -219,6 +224,24 @@ class TextPostprocessor {
         }
 
         return stringBuilder.toString()
+    }
+
+    /**
+     * True when Japanese outnumbers the other letters, so the line is a Japanese line rather than
+     * an English one carrying a stray glyph. Deliberately letter-counted, not "any glyph" — the
+     * previous "contains any Japanese" test is what let one kana rewrite an English bubble.
+     */
+    private fun isJapaneseDominant(text: String): Boolean {
+        var japanese = 0
+        var latin = 0
+        for (char in text) {
+            if (char.isJapaneseScript()) {
+                japanese++
+            } else if (char.isLetter()) {
+                latin++
+            }
+        }
+        return japanese > latin
     }
 
     private fun Char.isJapaneseScript(): Boolean {

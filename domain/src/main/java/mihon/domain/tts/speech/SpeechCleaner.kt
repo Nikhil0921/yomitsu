@@ -52,8 +52,11 @@ object SpeechCleaner {
      * share of letters/digits so legitimate dialogue (even emphatic, e.g.
      * "WHAT?!?!?!" → 40% letters) is never dropped. Symbol soup with stray
      * letters ("W@#R%!") is dropped.
+     *
+     * Shared with the OCR adaptive router ([mihon.domain.ocr.model.OcrQualitySignals]) so both
+     * layers agree on what "garbage" means instead of keeping two copies of the rule.
      */
-    private fun isOcrGarbage(text: String): Boolean {
+    internal fun isOcrGarbage(text: String): Boolean {
         if (text.length < 4) return false
         val nonWhitespace = text.count { !it.isWhitespace() }
         val meaningful = text.count { it.isLetterOrDigit() }

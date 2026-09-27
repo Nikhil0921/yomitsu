@@ -2,6 +2,7 @@ package mihon.domain.tts.speech
 
 import mihon.domain.ocr.model.OcrBoundingBox
 import mihon.domain.ocr.model.OcrRegion
+import mihon.domain.ocr.model.mergeSpacedSingleLetters
 import mihon.domain.tts.TtsSentence
 import mihon.domain.tts.toTtsSentences
 
@@ -13,6 +14,11 @@ import mihon.domain.tts.toTtsSentences
  * "WHAT?!?!?!" normalize to "WHAT?!" first, while meaningful punctuation
  * ("I don't know...") survives untouched. Punctuation-only sentence fragments
  * left over from terminal splitting (e.g. the "!" of "?!") are dropped.
+ *
+ * The last cleanup step re-joins letter-spaced tracked text ("N E T W O R K" →
+ * "NETWORK") so TTS speaks a word instead of spelling out every glyph. It runs after
+ * [SpeechCleaner] so that cleaner still sees the raw OCR text its heuristics were tuned
+ * for, and it applies to already-cached pages without invalidating the OCR cache.
  */
 object SpeechPipeline {
 
@@ -28,7 +34,7 @@ object SpeechPipeline {
         )
             .mapNotNull { region ->
                 SpeechCleaner.cleanRegionForSpeech(region.text, cleanupOptions)
-                    ?.let { region.copy(text = it) }
+                    ?.let { region.copy(text = mergeSpacedSingleLetters(it)) }
             }
             .toTtsSentences()
             .filter { it.text.any { c -> c.isLetterOrDigit() } }
