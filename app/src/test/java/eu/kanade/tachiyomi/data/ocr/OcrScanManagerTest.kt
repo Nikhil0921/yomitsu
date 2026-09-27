@@ -190,7 +190,7 @@ class OcrScanManagerTest {
 
         assertTrue(processedAny)
         assertEquals(
-            listOf(entry(1L, OcrScanQueueEntry.State.ERROR, lastError = "boom")),
+            listOf(entry(1L, OcrScanQueueEntry.State.ERROR, lastError = "boom", attempts = 1)),
             fixture.manager.queueState.value.entries,
         )
         coVerify(exactly = 1) { fixture.scanner.scanChapter(eq(1L), any(), any(), any(), any()) }
@@ -198,7 +198,7 @@ class OcrScanManagerTest {
     }
 
     @Test
-    fun runPendingQueueDoesNotAutoRetryFailures() = runTest {
+    fun runPendingQueueScansEachChapterOnceAndNeverLoops() = runTest {
         val fixture = createFixture(
             initialState = OcrScanStoreSnapshot(
                 entries = listOf(entry(7L, OcrScanQueueEntry.State.QUEUED)),
@@ -209,11 +209,126 @@ class OcrScanManagerTest {
 
         fixture.manager.runPendingQueue()
 
+        // One run must attempt the chapter exactly once: the automatic retry happens between runs
+        // (WorkManager backoff), never inside runPendingQueue's loop.
         assertEquals(
-            listOf(entry(7L, OcrScanQueueEntry.State.ERROR)),
+            listOf(entry(7L, OcrScanQueueEntry.State.ERROR, attempts = 1)),
             fixture.manager.queueState.value.entries,
         )
         coVerify(exactly = 1) { fixture.scanner.scanChapter(eq(7L), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun failedChapterIsAutomaticallyRetriedUpToTheBudget() = runTest {
+        val fixture = createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(entry(7L, OcrScanQueueEntry.State.QUEUED)),
+                isPaused = false,
+            ),
+        )
+        coEvery { fixture.scanner.scanChapter(any(), any(), any(), any(), any()) } returns false
+
+        // A GLENS/network failure is transient far more often than it is permanent: device ch4563
+        // p1 and ch8936 p2 both failed on three consecutive attempts, minutes apart, and the old
+        // code gave up after the first one forever (audit R2). Retry between runs, bounded.
+        repeat(AUTOMATIC_RETRIES) { attempt ->
+            fixture.manager.runPendingQueue()
+            assertEquals(
+                1,
+                fixture.manager.requeueFailedEntries(),
+                "attempt $attempt should have been re-queued",
+            )
+            assertEquals(
+                // The attempt count survives the re-queue: it is the budget.
+                listOf(entry(7L, OcrScanQueueEntry.State.QUEUED, attempts = attempt + 1)),
+                fixture.manager.queueState.value.entries,
+            )
+        }
+
+        fixture.manager.runPendingQueue()
+        assertEquals(0, fixture.manager.requeueFailedEntries(), "budget must be exhausted")
+        assertEquals(
+            listOf(entry(7L, OcrScanQueueEntry.State.ERROR, attempts = AUTOMATIC_RETRIES + 1)),
+            fixture.manager.queueState.value.entries,
+        )
+        coVerify(exactly = AUTOMATIC_RETRIES + 1) {
+            fixture.scanner.scanChapter(eq(7L), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun manualResumeRestoresTheAutomaticRetryBudget() = runTest {
+        val fixture = createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(
+                    entry(
+                        7L,
+                        OcrScanQueueEntry.State.ERROR,
+                        lastError = "boom",
+                        attempts = AUTOMATIC_RETRIES + 1,
+                    ),
+                ),
+                isPaused = false,
+            ),
+        )
+        coEvery { fixture.scanner.scanChapter(any(), any(), any(), any(), any()) } returns false
+
+        // Budget already spent: the manager leaves it in ERROR and never rescans on its own.
+        assertEquals(0, fixture.manager.requeueFailedEntries())
+        coVerify(exactly = 0) { fixture.scanner.scanChapter(eq(7L), any(), any(), any(), any()) }
+
+        // The user pressing resume is a fresh budget, not a fifth automatic attempt.
+        fixture.manager.resume()
+        assertEquals(
+            listOf(entry(7L, OcrScanQueueEntry.State.QUEUED)),
+            fixture.manager.queueState.value.entries,
+        )
+
+        fixture.manager.runPendingQueue()
+        assertEquals(1, fixture.manager.requeueFailedEntries())
+    }
+
+    @Test
+    fun nothingIsRetriedWhileTheQueueIsPaused() = runTest {
+        val fixture = createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(entry(7L, OcrScanQueueEntry.State.ERROR, attempts = 1)),
+                isPaused = true,
+            ),
+        )
+
+        assertEquals(0, fixture.manager.requeueFailedEntries())
+        assertEquals(
+            listOf(entry(7L, OcrScanQueueEntry.State.ERROR, attempts = 1)),
+            fixture.manager.queueState.value.entries,
+        )
+    }
+
+    @Test
+    fun aPersistedQueuedEntryStartsAWorkerOnConstruction() = runTest {
+        // Restored from a SCANNING entry after process death, or added while the previous worker
+        // was finishing (enqueueUniqueWork KEEP drops that start request). startIfPending had zero
+        // call sites, so the chapter sat queued with nothing to run it.
+        createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(entry(4L, OcrScanQueueEntry.State.QUEUED)),
+                isPaused = false,
+            ),
+        )
+
+        coVerify(atLeast = 1) { OcrScanJob.start(any()) }
+    }
+
+    @Test
+    fun aPausedQueueStartsNoWorkerOnConstruction() = runTest {
+        createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(entry(4L, OcrScanQueueEntry.State.QUEUED)),
+                isPaused = true,
+            ),
+        )
+
+        coVerify(exactly = 0) { OcrScanJob.start(any()) }
     }
 
     private fun createFixture(
@@ -261,11 +376,16 @@ class OcrScanManagerTest {
         chapterId: Long,
         state: OcrScanQueueEntry.State,
         lastError: String? = null,
+        attempts: Int = 0,
     ): OcrScanQueueEntry {
         return OcrScanQueueEntry(
             chapterId = chapterId,
             state = state,
             lastError = lastError,
+            attempts = attempts,
         )
     }
 }
+
+/** Mirrors OcrScanManager.AUTOMATIC_RETRIES; a second copy so the budget is pinned by the test. */
+private const val AUTOMATIC_RETRIES = 3

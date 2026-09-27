@@ -42,10 +42,51 @@ class OcrScanManager internal constructor(
             }
             .distinctUntilChanged()
 
+    init {
+        // A persisted QUEUED entry had no way to start a worker: this function existed with zero
+        // call sites. Two ways one appears with nothing running it: restoring a SCANNING entry
+        // after process death, and `enqueueUniqueWork(KEEP)` silently dropping a start request
+        // aimed at a worker that was about to finish. Both left the chapter queued forever.
+        startIfPending()
+    }
+
     fun startIfPending() {
         if (!queueState.value.isPaused && queueState.value.hasQueuedEntries) {
             startWorkerIfNeeded()
         }
+    }
+
+    /**
+     * Moves failed entries back to QUEUED while they still have automatic retries left, and
+     * returns how many were re-queued (0 when the budget is spent or the queue is paused).
+     *
+     * `ERROR` used to be terminal: `runPendingQueue` reported work done, `OcrScanJob` returned
+     * `Result.success()`, and nothing ever looked at the entry again — so a single transient
+     * GLENS/network failure (the dominant kind, device-verified) stopped a chapter from ever
+     * being scanned again. Retries happen BETWEEN worker runs, never inside the run loop, so
+     * WorkManager's backoff spaces them out and a single run still attempts each chapter once.
+     */
+    suspend fun requeueFailedEntries(): Int {
+        val current = queueState.value
+        if (current.isPaused) return 0
+        val retryable = current.entries.filter {
+            it.state == OcrScanQueueEntry.State.ERROR && it.attempts <= AUTOMATIC_RETRIES
+        }
+        if (retryable.isEmpty()) return 0
+
+        val retryableIds = retryable.map(OcrScanQueueEntry::chapterId).toSet()
+        updateQueueState { state ->
+            state.copy(
+                entries = state.entries.map { entry ->
+                    if (entry.chapterId in retryableIds) {
+                        entry.copy(state = OcrScanQueueEntry.State.QUEUED, lastError = null)
+                    } else {
+                        entry
+                    }
+                },
+            )
+        }
+        return retryable.size
     }
 
     suspend fun enqueue(chapterIds: Collection<Long>) {
@@ -93,6 +134,8 @@ class OcrScanManager internal constructor(
                     entry.copy(
                         state = OcrScanQueueEntry.State.QUEUED,
                         lastError = null,
+                        // A user-initiated resume is a fresh budget, not another automatic attempt.
+                        attempts = 0,
                     )
                 } else {
                     entry
@@ -357,6 +400,7 @@ class OcrScanManager internal constructor(
                     failedEntry.copy(
                         state = OcrScanQueueEntry.State.ERROR,
                         lastError = lastError,
+                        attempts = failedEntry.attempts + 1,
                     ),
                 )
                 addAll(state.entries.filterNot { entry -> entry.chapterId == chapterId })
@@ -416,6 +460,16 @@ class OcrScanManager internal constructor(
 
     private fun startWorkerIfNeeded() {
         OcrScanJob.start(context)
+    }
+
+    internal companion object {
+        /**
+         * Automatic retries per chapter before an `ERROR` entry is left alone. A dropped
+         * connection or a 5xx from the OCR endpoint is transient far more often than not, and the
+         * gaps between attempts are minutes apart, so three is generous; `resume()` gives the
+         * user an unlimited fresh budget.
+         */
+        const val AUTOMATIC_RETRIES = 3
     }
 
     private data class CancelResult(

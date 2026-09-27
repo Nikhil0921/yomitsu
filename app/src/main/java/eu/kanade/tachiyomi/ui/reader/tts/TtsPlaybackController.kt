@@ -251,7 +251,6 @@ internal class TtsPlaybackController(
                 ctx,
                 pageIndex,
                 priority = OcrScanPriority.HIGH,
-                reportFailure = false,
             )
         }
     }
@@ -580,12 +579,16 @@ internal class TtsPlaybackController(
             }
             scanned
         } ?: run {
-            // OCR failed/timed out: advance gracefully instead of stopping playback.
+            // OCR failed or the 30 s guard fired. Treat the page as textless and let the advance
+            // policy move on. This used to call fail(TtsError.OcrError) right after logging
+            // "advancing gracefully", which set phase = Error and returned null out of runPlayback
+            // — one page whose GLENS upload timed out ended the entire read-aloud session, with no
+            // way to continue past it (device: 3 consecutive deaths on ch4563 p1).
             logcat(LogPriority.WARN) {
-                "TTS OCR timeout page=$pageIndex chapter=${ctx.chapter.id}; advancing gracefully"
+                "TTS OCR unavailable for page=$pageIndex chapter=${ctx.chapter.id}; " +
+                    "treating the page as having no text"
             }
-            fail(TtsError.OcrError)
-            return@withIOContext null
+            return@withIOContext emptyList()
         }
         val exclusionLookupStartNs = if (BuildConfig.DEBUG) System.nanoTime() else 0L
         if (BuildConfig.DEBUG) {
@@ -698,14 +701,12 @@ internal class TtsPlaybackController(
     /** Cached-miss path: resolve the bitmap through the shared pipeline, scan, recycle.
      *  Runs on IO: page-list resolution does network via Rx awaitSingle on the calling
      *  thread, and the prefetch job launches on the Main viewModelScope.
-     *  Callers pick [priority] and [reportFailure] per their context: an active TTS
-     *  page must be HIGH and report failures; opportunistic reader-open/prefetch work
-     *  may run quieter. */
+     *  Returns null when the page could not be obtained; the caller treats that as a textless
+     *  page. Failures are never fatal to the session. */
     private suspend fun scanOnDemand(
         ctx: TtsChapterContext,
         pageIndex: Int,
         priority: OcrScanPriority = OcrScanPriority.HIGH,
-        reportFailure: Boolean = true,
     ): OcrPageResult? = try {
         logcat(LogPriority.DEBUG) { "TTS on-demand scan start chapter=${ctx.chapter.id} page=$pageIndex" }
         withIOContext {
@@ -798,11 +799,11 @@ internal class TtsPlaybackController(
         throw e
     } catch (e: OutOfMemoryError) {
         logcat(LogPriority.ERROR, e) { "OOM during TTS page scan" }
-        if (reportFailure) fail(TtsError.OcrError)
         null
     } catch (e: Exception) {
+        // Never fatal: the caller decides what an unobtainable page means, and it is the same
+        // decision for every caller (treat the page as textless and advance).
         logcat(LogPriority.ERROR, e) { "TTS on-demand scan failed" }
-        if (reportFailure) fail(TtsError.OcrError)
         null
     }
 
@@ -893,7 +894,6 @@ internal class TtsPlaybackController(
                                 ctx,
                                 page,
                                 priority = OcrScanPriority.NORMAL,
-                                reportFailure = false,
                             )
                             if (scanned != null) {
                                 logcat(LogPriority.DEBUG) { "TTS prefetch complete page=$page" }

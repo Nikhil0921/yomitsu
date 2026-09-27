@@ -97,10 +97,15 @@ internal class OcrScanNotifier(
     }
 
     private fun OcrScanFailure.toMessage(): String {
-        return when (this) {
+        return when (val failure = this) {
             OcrScanFailure.ChapterNotFound -> context.stringResource(MR.strings.chapter_not_found)
             OcrScanFailure.MangaNotFound -> context.stringResource(MR.strings.ocr_scan_manga_not_found)
             OcrScanFailure.NoPages -> context.stringResource(MR.strings.page_list_empty_error)
+            is OcrScanFailure.PagesSkipped -> context.stringResource(
+                MR.strings.ocr_preprocess_pages_skipped,
+                failure.skipped,
+                failure.total,
+            )
             is OcrScanFailure.Unexpected ->
                 message
                     ?: context.stringResource(MR.strings.download_notifier_unknown_error)

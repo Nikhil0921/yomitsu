@@ -4,6 +4,13 @@ internal data class OcrScanQueueEntry(
     val chapterId: Long,
     val state: State,
     val lastError: String? = null,
+    /**
+     * How many times this chapter has failed. Drives the bounded automatic retry: without it an
+     * `ERROR` entry was terminal forever, so one transient GLENS/network failure permanently
+     * stopped a chapter from ever being scanned again (docs/audits/full-ocr-pipeline-audit.md §2).
+     * Reset by a user-initiated [OcrScanManager.resume].
+     */
+    val attempts: Int = 0,
 ) {
     enum class State {
         QUEUED,

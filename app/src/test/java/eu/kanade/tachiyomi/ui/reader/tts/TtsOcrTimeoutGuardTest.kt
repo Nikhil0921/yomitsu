@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import mihon.domain.ocr.exception.OcrException
 import mihon.domain.ocr.interactor.GetCachedPageOcr
 import mihon.domain.ocr.interactor.GetOcrExclusionZones
 import mihon.domain.ocr.interactor.ScanPageOcr
@@ -258,7 +259,102 @@ class TtsOcrTimeoutGuardTest {
         }
     }
 
-    private fun ctx(): TtsChapterContext {
+    /**
+     * A page whose OCR cannot be obtained (GLENS upload failed, or the 30 s guard fired) must
+     * not kill the whole Read-Aloud session. The page is treated as textless and the advance
+     * policy moves on. Before the fix `acquireSentences` logged "advancing gracefully" and then
+     * called `fail(TtsError.OcrError)`, which sets phase = Error and returns null out of
+     * `runPlayback` — device-verified as three consecutive session deaths on ch4563 p1
+     * (docs/audits/full-ocr-pipeline-audit.md §1).
+     */
+    @Test
+    fun failedPageAdvancesInsteadOfFailingTheSession() {
+        runFailingScanTest(totalPages = 10) { events, controller ->
+            // The very first event must be the page advance, not a failure.
+            withTimeout(10_000) {
+                while (events.filterIsInstance<TtsEvent.AdvancePage>().isEmpty()) delay(50)
+            }
+            assertEquals(1, events.filterIsInstance<TtsEvent.AdvancePage>().first().pageIndex)
+            assertTrue(
+                events.none { it is TtsEvent.Failed && it.error == TtsError.OcrError },
+                "a failed page scan must not emit Failed(OcrError), got $events",
+            )
+            assertTrue(
+                controller.state.value.phase != TtsPhase.Error,
+                "a failed page scan must not put the session in Error, " +
+                    "got ${controller.state.value.phase}",
+            )
+        }
+    }
+
+    /**
+     * When the failing page is the last one there is nowhere to advance to, so the chapter ends
+     * as [TtsPhase.Finished] and the existing "no text found" signal is what the user gets —
+     * never [TtsError.OcrError].
+     */
+    @Test
+    fun failedLastPageFinishesAsNoTextFound() {
+        runFailingScanTest(totalPages = 1) { events, controller ->
+            withTimeout(10_000) {
+                while (controller.state.value.phase != TtsPhase.Finished) delay(50)
+            }
+            assertEquals(TtsPhase.Finished, controller.state.value.phase)
+            assertTrue(
+                events.any { it is TtsEvent.Failed && it.error == TtsError.NoTextFound },
+                "expected Failed(NoTextFound), got $events",
+            )
+        }
+    }
+
+    private fun runFailingScanTest(
+        totalPages: Int,
+        assertion: suspend (List<TtsEvent>, TtsPlaybackController) -> Unit,
+    ) {
+        mockkStatic("eu.kanade.tachiyomi.util.ocr.OcrImageMapperKt")
+        every { any<Bitmap>().toOcrImage() } returns OcrImage(width = 2, height = 2, pixels = IntArray(4))
+        try {
+            val bitmap = mockk<Bitmap>()
+            every { bitmap.isRecycled } returns false
+            every { bitmap.recycle() } just runs
+            val pages = (0 until totalPages).map { index ->
+                OcrPageInput(pageIndex = index, openBitmap = { bitmap }, openBitmapRegion = { null })
+            }
+            coEvery { pageSourceResolver.resolve(any(), any()) } returns ResolvedOcrPages(pages)
+            coEvery { getCachedPageOcr.await(any(), any()) } returns null
+            coEvery { scanPageOcr.await(any(), any(), any(), any()) } throws
+                OcrException.ConnectionError(java.io.IOException("glens unreachable"))
+
+            val supervisorJob = SupervisorJob()
+            val scope = CoroutineScope(supervisorJob)
+            val controller = TtsPlaybackController(
+                scope = scope,
+                engine = engine,
+                preferences = preferences,
+                getCachedPageOcr = getCachedPageOcr,
+                scanPageOcr = scanPageOcr,
+                withOcrScanSession = withOcrScanSession,
+                pageSourceResolver = pageSourceResolver,
+                getExclusionZones = getExclusionZones,
+                provideContext = { ctx(totalPages) },
+            )
+            val events = java.util.concurrent.CopyOnWriteArrayList<TtsEvent>()
+            runBlocking {
+                val collector = scope.launch { controller.events.collect { events += it } }
+                controller.start(ctx(totalPages), 0)
+                try {
+                    assertion(events, controller)
+                } finally {
+                    collector.cancel()
+                    controller.stop()
+                    supervisorJob.cancel()
+                }
+            }
+        } finally {
+            unmockkStatic("eu.kanade.tachiyomi.util.ocr.OcrImageMapperKt")
+        }
+    }
+
+    private fun ctx(totalPages: Int = 10): TtsChapterContext {
         val manga = mockk<Manga> {
             every { id } returns 1L
             every { source } returns 2L
@@ -269,7 +365,7 @@ class TtsOcrTimeoutGuardTest {
         return TtsChapterContext(
             manga = manga,
             chapter = chapter,
-            totalPages = 10,
+            totalPages = totalPages,
             hasNextChapter = false,
         )
     }

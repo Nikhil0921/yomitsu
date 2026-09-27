@@ -51,8 +51,15 @@ class OcrChapterScannerTest {
         assertEquals(3, completed.single().processedPages)
     }
 
+    /**
+     * Renamed and re-specified 2026-09-27 under explicit rules §10 sign-off. This used to assert
+     * `ok == true` — i.e. that a chapter with an unreadable page is reported as DONE, the queue
+     * entry is removed, and the holes are only discovered later by Read-Aloud re-OCRing them one
+     * cold network round trip at a time. The "scan continues" half of the name is still exactly
+     * right and is still asserted: every page is attempted.
+     */
     @Test
-    fun failedPageIsSkippedAndScanContinues() = runTest {
+    fun failedPageIsSkippedButScanIsNotReportedComplete() = runTest {
         val fixture = createFixture(pages = 3) { _, pageIndex ->
             if (pageIndex == 1) {
                 error("ocr engine down")
@@ -61,22 +68,29 @@ class OcrChapterScannerTest {
         }
 
         val completed = mutableListOf<OcrChapterScanProgress>()
+        val errors = mutableListOf<OcrChapterScanError>()
         val ok = fixture.scanner.scanChapter(
             chapterId = 1L,
             onProgress = {},
             onComplete = { completed += it },
-            onError = { throw AssertionError("unexpected error: $it") },
+            onError = { errors += it },
         )
 
-        assertTrue(ok)
+        assertEquals(false, ok)
         assertEquals(2, completed.single().processedPages)
+        assertEquals(OcrScanFailure.PagesSkipped(skipped = 1, total = 3), errors.single().failure)
         coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(0), any()) }
         coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(1), any()) }
         coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(2), any()) }
     }
 
+    /**
+     * Renamed and re-specified 2026-09-27 under explicit rules §10 sign-off, same as
+     * [failedPageIsSkippedButScanIsNotReportedComplete]. A page whose scan exceeds the per-page
+     * guard is a hole in the cache, so the chapter is incomplete — the loop still continues.
+     */
     @Test
-    fun timedOutPageIsSkippedAndScanContinues() = runTest {
+    fun timedOutPageIsSkippedButScanIsNotReportedComplete() = runTest {
         val fixture = createFixture(
             pages = 3,
             pageScanTimeout = 100.milliseconds,
@@ -88,21 +102,150 @@ class OcrChapterScannerTest {
         }
 
         val completed = mutableListOf<OcrChapterScanProgress>()
+        val errors = mutableListOf<OcrChapterScanError>()
         val ok = fixture.scanner.scanChapter(
             chapterId = 1L,
             onProgress = {},
             onComplete = { completed += it },
+            onError = { errors += it },
+        )
+
+        assertEquals(false, ok)
+        assertEquals(2, completed.single().processedPages)
+        assertEquals(OcrScanFailure.PagesSkipped(skipped = 1, total = 3), errors.single().failure)
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(1), any()) }
+    }
+
+    @Test
+    fun scanDoesNotWipeTheOcrCache() = runTest {
+        val fixture = createFixture(pages = 3) { _, pageIndex -> pageResult(pageIndex) }
+
+        fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
             onError = { throw AssertionError("unexpected error: $it") },
         )
 
-        assertTrue(ok)
-        assertEquals(2, completed.single().processedPages)
+        coVerify(exactly = 0) { fixture.clearCachedChapterOcr.await(any()) }
+    }
+
+    @Test
+    fun failedPageDoesNotWipeAlreadyScannedPages() = runTest {
+        val fixture = createFixture(pages = 3) { _, pageIndex ->
+            if (pageIndex == 1) {
+                error("ocr engine down")
+            }
+            pageResult(pageIndex)
+        }
+
+        // A partial scan legitimately reports PagesSkipped now, so the callback collects instead of
+        // throwing — throwing from onError used to be caught by the scanner's own catch-all and
+        // turned into a nested Unexpected error.
+        val errors = mutableListOf<OcrChapterScanError>()
+        fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
+            onError = { errors += it },
+        )
+
+        assertEquals(OcrScanFailure.PagesSkipped(skipped = 1, total = 3), errors.single().failure)
+        // Pages 0 and 2 were cached by this run; a wipe here is what left the chapter in ERROR
+        // with an empty cache and made Read-Aloud re-OCR every page on demand (audit R1).
+        coVerify(exactly = 0) { fixture.clearCachedChapterOcr.await(any()) }
+    }
+
+    @Test
+    fun networkAbortMidScanDoesNotWipeAlreadyScannedPages() = runTest {
+        val fixture = createFixture(pages = 5, onlineCalls = 1) { _, pageIndex -> pageResult(pageIndex) }
+
+        val errors = mutableListOf<OcrChapterScanError>()
+        val ok = fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
+            onError = { errors += it },
+        )
+
+        assertEquals(false, ok)
+        assertEquals(1, errors.size)
+        coVerify(exactly = 0) { fixture.clearCachedChapterOcr.await(any()) }
+    }
+
+    @Test
+    fun cacheEventIsNotResetToFalseAtScanStart() = runTest {
+        val fixture = createFixture(pages = 2) { _, pageIndex -> pageResult(pageIndex) }
+
+        val events = mutableListOf<Boolean>()
+        fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
+            onError = { throw AssertionError("unexpected error: $it") },
+            onCacheStateChanged = { _, hasResults -> events += hasResults },
+        )
+
+        // The scan adds to the cache; it never clears it, so reporting "no results" at the start
+        // would be a lie that flips the chapter badge off and (briefly) on again.
+        assertEquals(listOf(true), events)
+    }
+
+    @Test
+    fun partialScanReportsFailureInsteadOfClaimingSuccess() = runTest {
+        val fixture = createFixture(pages = 5) { _, pageIndex ->
+            if (pageIndex == 1 || pageIndex == 3) {
+                error("ocr engine down")
+            }
+            pageResult(pageIndex)
+        }
+
+        val completed = mutableListOf<OcrChapterScanProgress>()
+        val errors = mutableListOf<OcrChapterScanError>()
+        val ok = fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = { completed += it },
+            onError = { errors += it },
+        )
+
+        // A chapter with holes in its cache must not be reported as done, or the queue entry is
+        // removed and Read-Aloud has to re-OCR the missing pages on demand, one by one
+        // (docs/audits/full-ocr-pipeline-audit.md §2, R4).
+        assertEquals(false, ok)
+        assertEquals(3, completed.single().processedPages)
+        assertEquals(
+            OcrScanFailure.PagesSkipped(skipped = 2, total = 5),
+            errors.single().failure,
+        )
+        // The loop still visits every page: a hole must not abort the remaining ones.
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(0), any()) }
         coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(1), any()) }
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(2), any()) }
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(3), any()) }
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(4), any()) }
+    }
+
+    @Test
+    fun completeScanStillReportsSuccessAndNoError() = runTest {
+        val fixture = createFixture(pages = 3) { _, pageIndex -> pageResult(pageIndex) }
+
+        val errors = mutableListOf<OcrChapterScanError>()
+        val ok = fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
+            onError = { errors += it },
+        )
+
+        assertTrue(ok)
+        assertTrue(errors.isEmpty(), "a clean scan must not report an error, got $errors")
     }
 
     private fun createFixture(
         pages: Int = 3,
         pageScanTimeout: Duration = 30_000.milliseconds,
+        onlineCalls: Int = Int.MAX_VALUE,
         scanBehavior: suspend (chapterId: Long, pageIndex: Int) -> OcrPageResult,
     ): Fixture {
         val context = mockk<Context>(relaxed = true)
@@ -110,6 +253,7 @@ class OcrChapterScannerTest {
         val wifi = mockk<WifiManager>(relaxed = true)
         val networkInfo = mockk<NetworkInfo>(relaxed = true)
         val capabilities = mockk<NetworkCapabilities>(relaxed = true)
+        val onlineChecks = java.util.concurrent.atomic.AtomicInteger(0)
         every { context.getSystemService(ConnectivityManager::class.java) } returns connectivity
         every { context.getSystemService(ConnectivityManager::class.java.name) } returns connectivity
         every { context.getSystemService(WifiManager::class.java) } returns wifi
@@ -117,7 +261,9 @@ class OcrChapterScannerTest {
         every { connectivity.activeNetworkInfo } returns networkInfo
         every { networkInfo.isConnected } returns true
         every { connectivity.getNetworkCapabilities(any()) } returns capabilities
-        every { capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } returns true
+        every { capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } answers {
+            onlineChecks.getAndIncrement() < onlineCalls
+        }
 
         val chapter = Chapter.create().copy(mangaId = 7L, name = "Chapter 1")
         val manga = Manga.create().copy(id = 7L, title = "Manga")
@@ -191,7 +337,7 @@ class OcrChapterScannerTest {
             pageScanTimeout = pageScanTimeout,
         )
 
-        return Fixture(scanner, scanPageOcr)
+        return Fixture(scanner, scanPageOcr, clearCachedChapterOcr)
     }
 
     private fun pageResult(pageIndex: Int): OcrPageResult {
@@ -208,5 +354,6 @@ class OcrChapterScannerTest {
     private data class Fixture(
         val scanner: OcrChapterScanner,
         val scanPageOcr: ScanPageOcr,
+        val clearCachedChapterOcr: ClearCachedChapterOcr,
     )
 }

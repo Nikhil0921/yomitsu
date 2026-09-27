@@ -72,6 +72,7 @@ internal object OcrScanStoreSerializer {
                 PersistedOcrScanQueueEntry(
                     chapterId = entry.chapterId,
                     state = entry.state,
+                    attempts = entry.attempts,
                 )
             }
         return json.encodeToString(persistedEntries)
@@ -97,6 +98,7 @@ internal object OcrScanStoreSerializer {
                 OcrScanQueueEntry(
                     chapterId = entry.chapterId,
                     state = entry.state,
+                    attempts = entry.attempts,
                 )
             }
     }
@@ -106,4 +108,6 @@ internal object OcrScanStoreSerializer {
 private data class PersistedOcrScanQueueEntry(
     val chapterId: Long,
     val state: OcrScanQueueEntry.State,
+    // Added after the first release of this store; the default keeps older JSON decodable.
+    val attempts: Int = 0,
 )

@@ -22,6 +22,13 @@ internal class OcrChapterScanner(
     private val context: Context,
     private val getChapter: GetChapter,
     private val getManga: GetManga,
+    /**
+     * Deliberately NOT used to clear anything. Injected only so the no-wipe invariant is a real
+     * behavioural test rather than a vacuous one — `OcrChapterScannerTest` verifies zero calls.
+     * The scanner used to wipe the chapter's whole cache at scan start and on every failure path,
+     * which destroyed its own work and left ERROR chapters with an empty cache (audit R1).
+     */
+    @Suppress("unused")
     private val clearCachedChapterOcr: ClearCachedChapterOcr,
     private val withOcrScanSession: WithOcrScanSession,
     private val scanPageOcr: ScanPageOcr,
@@ -66,9 +73,11 @@ internal class OcrChapterScanner(
 
         return try {
             withOcrScanSession.await {
-                clearCachedChapterOcr.await(chapterId)
-                onCacheStateChanged(chapterId, false)
-
+                // The OCR cache is accumulated good work and this scan only ADDS to it. It used to
+                // be wiped here at scan start and again on every failure path below, which
+                // destroyed the pages the run had already scanned, left a chapter that ended in
+                // ERROR with an empty cache, and made Read-Aloud re-OCR every page of it on demand.
+                // Device proof: docs/audits/full-ocr-pipeline-audit.md §1 (R1).
                 val resolvedPages = pageSourceResolver.resolve(manga, chapter)
                 resolvedPages.use pageScope@{ pages ->
                     if (pages.pages.isEmpty()) {
@@ -102,8 +111,8 @@ internal class OcrChapterScanner(
                             for (page in pages.pages) {
                                 val networkError = checkNetworkState()
                                 if (networkError != null) {
-                                    clearCachedChapterOcr.await(chapterId)
-                                    onCacheStateChanged(chapterId, false)
+                                    // No wipe: the pages already scanned stay cached. Wiping here
+                                    // used to throw away the whole run over a dropped connection.
                                     onError(
                                         OcrChapterScanError(
                                             mangaId = manga.id,
@@ -158,10 +167,24 @@ internal class OcrChapterScanner(
                                 logcat(LogPriority.WARN) {
                                     "OCR scan of chapter $chapterId finished with $skippedPages/$totalPages pages skipped"
                                 }
+                                onComplete(lastProgress)
+                                onError(
+                                    OcrChapterScanError(
+                                        mangaId = manga.id,
+                                        mangaTitle = manga.title,
+                                        chapterId = chapterId,
+                                        chapterName = chapter.name,
+                                        failure = OcrScanFailure.PagesSkipped(
+                                            skipped = skippedPages,
+                                            total = totalPages,
+                                        ),
+                                    ),
+                                )
+                                false
+                            } else {
+                                onComplete(lastProgress)
+                                true
                             }
-
-                            onComplete(lastProgress)
-                            true
                         } catch (e: Throwable) {
                             handleUnexpectedFailure(
                                 chapterId = chapterId,
@@ -171,7 +194,6 @@ internal class OcrChapterScanner(
                                 throwable = e,
                                 logMessage = "Failed to scan OCR",
                                 onError = onError,
-                                onCacheStateChanged = onCacheStateChanged,
                             )
                         }
                     }
@@ -186,7 +208,6 @@ internal class OcrChapterScanner(
                 throwable = e,
                 logMessage = "Failed to start OCR scan",
                 onError = onError,
-                onCacheStateChanged = onCacheStateChanged,
             )
         }
     }
@@ -199,15 +220,12 @@ internal class OcrChapterScanner(
         throwable: Throwable,
         logMessage: String,
         onError: (OcrChapterScanError) -> Unit,
-        onCacheStateChanged: (chapterId: Long, hasResults: Boolean) -> Unit,
     ): Boolean {
         if (throwable is CancellationException) {
             throw throwable
         }
 
         logcat(LogPriority.ERROR, throwable) { "$logMessage for chapterId=$chapterId" }
-        clearCachedChapterOcr.await(chapterId)
-        onCacheStateChanged(chapterId, false)
         onError(
             OcrChapterScanError(
                 mangaId = mangaId,
@@ -262,6 +280,15 @@ internal sealed interface OcrScanFailure {
     data object MangaNotFound : OcrScanFailure
 
     data object NoPages : OcrScanFailure
+
+    /**
+     * The chapter has holes in its OCR cache. Reported as a failure on purpose: the scan used to
+     * return success here, which made the queue drop the entry as done while pages were missing,
+     * so Read-Aloud only discovered the gaps later, one cold network round trip at a time
+     * (docs/audits/full-ocr-pipeline-audit.md §2, R4). With the automatic retry budget, the retry
+     * only re-runs the missing pages — the scanned ones are served from the cache.
+     */
+    data class PagesSkipped(val skipped: Int, val total: Int) : OcrScanFailure
 
     data class Unexpected(val message: String?) : OcrScanFailure
 }

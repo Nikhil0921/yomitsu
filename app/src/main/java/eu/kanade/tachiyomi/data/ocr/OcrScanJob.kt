@@ -52,7 +52,18 @@ internal class OcrScanJob(
         setForegroundSafely()
         return try {
             ocrScanManager.runPendingQueue()
-            Result.success()
+            if (ocrScanManager.requeueFailedEntries() > 0) {
+                // Failed entries still have budget: come back on WorkManager's backoff rather than
+                // leaving them in ERROR forever. runPendingQueue attempted each chapter once, so
+                // this cannot spin.
+                Result.retry()
+            } else {
+                // A QUEUED entry can appear while this worker was finishing, and
+                // enqueueUniqueWork(KEEP) drops a start request aimed at a running worker, so the
+                // entry would otherwise sit with nothing to run it.
+                ocrScanManager.startIfPending()
+                Result.success()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
