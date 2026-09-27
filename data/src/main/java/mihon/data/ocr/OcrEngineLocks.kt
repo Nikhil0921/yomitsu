@@ -49,6 +49,9 @@ internal class OcrEngineLocks {
             OcrRepositoryImpl.EngineType.LEGACY -> glensMutex
             OcrRepositoryImpl.EngineType.GLENS -> glensMutex
             OcrRepositoryImpl.EngineType.FAST -> fastMutex
+            // Shares the Fast lock: both are local CPU interpreters, and a new mutex tier would
+            // only add a way for the two to run at once and fight over the same cores.
+            OcrRepositoryImpl.EngineType.PPOCR -> fastMutex
             OcrRepositoryImpl.EngineType.OWOCR -> owOcrMutex
         }
     }

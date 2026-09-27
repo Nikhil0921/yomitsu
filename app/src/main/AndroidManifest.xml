@@ -228,6 +228,20 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!--
+            ONNX Runtime merges this provider in from its own manifest, and it runs at every app
+            start from ActivityThread.installContentProviders — i.e. before Application.onCreate, so
+            OrtEnvironment.setTelemetry(false) in the engine can never prevent it. On construction
+            it loads libonnxruntime, derives a device id from android_id plus Build.MANUFACTURER and
+            Build.MODEL, registers a default network callback and a battery receiver, and hands the
+            native 1DS telemetry stack an HTTP client. Yomihon keeps OCR content and usage on the
+            device (rules §8), so the provider is removed rather than merely disabled.
+        -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

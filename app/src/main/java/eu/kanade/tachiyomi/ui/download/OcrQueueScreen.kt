@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.download
 
+import android.text.format.Formatter
 import android.view.LayoutInflater
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -32,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -49,10 +51,13 @@ import eu.kanade.presentation.more.settings.widget.InfoWidget
 import eu.kanade.presentation.more.settings.widget.ListPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupCard
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
+import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.presentation.util.Screen
+import eu.kanade.tachiyomi.data.ocr.OcrModelDownloadManager
 import eu.kanade.tachiyomi.databinding.DownloadListBinding
 import kotlinx.collections.immutable.toPersistentList
 import mihon.domain.ocr.model.OcrModel
+import mihon.domain.ocr.model.OcrModelDownloadStatus
 import mihon.domain.ocr.service.OcrPreferences
 import mihon.feature.ocr.titleRes
 import tachiyomi.i18n.MR
@@ -69,6 +74,7 @@ object OcrQueueScreen : Screen() {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val context = LocalContext.current
         val screenModel = rememberScreenModel { OcrQueueScreenModel() }
         val state by screenModel.state.collectAsState()
         val isQueueRunning by screenModel.isQueueRunning.collectAsState()
@@ -88,6 +94,8 @@ object OcrQueueScreen : Screen() {
         val useFallbackModels by useFallbackModelsPreference
             .changes()
             .collectAsState(initial = useFallbackModelsPreference.get())
+        val downloadManager = remember { Injekt.get<OcrModelDownloadManager>() }
+        val downloadState by downloadManager.state.collectAsState()
 
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
         var fabExpanded by remember { mutableStateOf(true) }
@@ -194,14 +202,68 @@ object OcrQueueScreen : Screen() {
                         title = stringResource(MR.strings.pref_ocr_model),
                         subtitle = stringResource(ocrModel.titleRes),
                         icon = null,
+                        // LEGACY is intentionally absent: it is deprecated and its engine
+                        // already resolves to GLENS (see OcrRepositoryImpl.engineFor), so
+                        // offering it would only expose a second name for the same engine.
+                        // FAST is absent for the same reason in spirit: it is the unreachable
+                        // JP-vocab recognizer, superseded by PPOCR which also detects text.
+                        // A stored LEGACY/FAST value still renders its own subtitle and can be
+                        // moved to another engine here.
                         entries = mapOf(
-                            OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
-                            OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
+                            OcrModel.PPOCR to stringResource(OcrModel.PPOCR.titleRes),
+                            OcrModel.ADAPTIVE to stringResource(OcrModel.ADAPTIVE.titleRes),
                             OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
                             OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
                         ),
                         onValueChange = ocrModelPreference::set,
                     )
+                    if (ocrModel == OcrModel.PPOCR || ocrModel == OcrModel.ADAPTIVE) {
+                        val size = Formatter.formatFileSize(context, downloadManager.installBytes)
+                        InfoWidget(
+                            text = stringResource(
+                                if (ocrModel == OcrModel.ADAPTIVE) {
+                                    MR.strings.ocr_model_adaptive_note
+                                } else {
+                                    MR.strings.ocr_model_ppocr_note
+                                },
+                                size,
+                            ),
+                        )
+                        when (downloadState.status) {
+                            OcrModelDownloadStatus.DOWNLOADED -> TextPreferenceWidget(
+                                title = stringResource(
+                                    MR.strings.ocr_model_downloaded,
+                                    size,
+                                ),
+                                icon = null,
+                                onPreferenceClick = { downloadManager.downloader.delete() },
+                            )
+
+                            OcrModelDownloadStatus.DOWNLOADING -> TextPreferenceWidget(
+                                title = stringResource(
+                                    MR.strings.ocr_model_downloading,
+                                    (downloadState.progress * 100).toInt(),
+                                ),
+                                icon = null,
+                            )
+
+                            OcrModelDownloadStatus.ERROR -> TextPreferenceWidget(
+                                title = stringResource(
+                                    MR.strings.ocr_model_download_failed,
+                                    downloadState.errorMessage.orEmpty(),
+                                ),
+                                subtitle = stringResource(MR.strings.ocr_model_download_retry),
+                                icon = null,
+                                onPreferenceClick = downloadManager::enqueue,
+                            )
+
+                            OcrModelDownloadStatus.NOT_DOWNLOADED -> TextPreferenceWidget(
+                                title = stringResource(MR.strings.ocr_model_download, size),
+                                icon = null,
+                                onPreferenceClick = downloadManager::enqueue,
+                            )
+                        }
+                    }
                     if (ocrModel == OcrModel.OWOCR) {
                         EditTextPreferenceWidget(
                             title = stringResource(MR.strings.pref_owocr_address),

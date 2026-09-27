@@ -21,10 +21,12 @@ import mihon.domain.ocr.model.OcrPageResult
 import mihon.domain.ocr.model.OcrRegion
 import mihon.domain.ocr.model.OcrScanPriority
 import mihon.domain.ocr.model.OcrTextOrientation
+import mihon.domain.ocr.model.PpOcrAssets
 import mihon.domain.ocr.repository.OcrRepository
 import tachiyomi.core.common.preference.AndroidPreferenceStore
 import tachiyomi.core.common.preference.getEnum
 import tachiyomi.core.common.util.system.logcat
+import java.io.File
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -55,6 +57,15 @@ class OcrRepositoryImpl(
     private var glensEngine: GlensOcrEngine? = null
     private var owOcrEngine: OwOcrEngine? = null
     private var detEngine: DetOcrEngine? = null
+    private var ppOcrEngine: PpOcrV5Engine? = null
+    private var hybridEngine: HybridOcrEngine? = null
+
+    /**
+     * Local models live in app-internal storage, not assets: they are an on-demand download, and
+     * `filesDir` is outside the repo so a stray weight can never be committed (audit R9).
+     */
+    private val ppOcrModelDirectory: File =
+        File(File(context.filesDir, PpOcrAssets.MODEL_DIRECTORY), PpOcrAssets.VERSION_DIRECTORY)
 
     private val engineLocks = OcrEngineLocks()
     private val cleanupMutex = Mutex()
@@ -77,6 +88,7 @@ class OcrRepositoryImpl(
         FAST,
         GLENS,
         OWOCR,
+        PPOCR,
     }
 
     private data class ScanKey(val chapterId: Long, val pageIndex: Int)
@@ -95,6 +107,7 @@ class OcrRepositoryImpl(
             OcrModel.FAST -> EngineType.FAST
             OcrModel.GLENS -> EngineType.GLENS
             OcrModel.OWOCR -> EngineType.OWOCR
+            OcrModel.PPOCR, OcrModel.ADAPTIVE -> EngineType.PPOCR
         }
     }
 
@@ -120,6 +133,7 @@ class OcrRepositoryImpl(
             EngineType.FAST -> EngineType.GLENS
             EngineType.LEGACY -> EngineType.GLENS
             EngineType.OWOCR -> EngineType.GLENS
+            EngineType.PPOCR -> EngineType.GLENS
         }
     }
 
@@ -149,12 +163,29 @@ class OcrRepositoryImpl(
                     owOcrEngine = it
                 }
             }
+            EngineType.PPOCR -> ppOcrEngine()
+        }
+    }
+
+    private fun ppOcrEngine(): PpOcrV5Engine {
+        return ppOcrEngine ?: PpOcrV5Engine(ppOcrModelDirectory, textPostprocessor).also {
+            ppOcrEngine = it
+        }
+    }
+
+    private fun hybridEngine(): HybridOcrEngine {
+        return hybridEngine ?: HybridOcrEngine(ppOcrEngine()).also {
+            hybridEngine = it
         }
     }
 
     private fun detectionEngine(): DetOcrEngine {
-        // TODO: replace with a real local-model DetOcrEngine when available;
-        // until then every scan redirects to Glens via the fallback chain.
+        // The local PP-OCRv5 detector is real, but only once its weights are installed; until then
+        // every local scan redirects to Glens via the existing fallback chain.
+        val selected = ocrModelPref.get()
+        if (selected == OcrModel.PPOCR || selected == OcrModel.ADAPTIVE) {
+            if (ppOcrEngine().isInstalled()) return ppOcrEngine()
+        }
         return detEngine ?: UnavailableDetOcrEngine().also {
             detEngine = it
         }
@@ -207,7 +238,7 @@ class OcrRepositoryImpl(
                     // ponytail: drop this redirect when a real DetOcrEngine lands.
                     val effective = when (type) {
                         EngineType.LEGACY, EngineType.FAST -> EngineType.GLENS
-                        EngineType.GLENS, EngineType.OWOCR -> type
+                        EngineType.GLENS, EngineType.OWOCR, EngineType.PPOCR -> type
                     }
                     recognizeWithFallback(effective, bitmap)
                 }
@@ -301,6 +332,21 @@ class OcrRepositoryImpl(
             modelKey = selectedModel,
             priority = priority,
         )
+        OcrModel.PPOCR -> scanLocalOrFallback(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            image = image,
+            modelKey = selectedModel,
+            type = EngineType.PPOCR,
+            priority = priority,
+        )
+        OcrModel.ADAPTIVE -> scanAdaptive(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            image = image,
+            modelKey = selectedModel,
+            priority = priority,
+        )
     }
 
     override suspend fun getCachedPage(
@@ -364,12 +410,18 @@ class OcrRepositoryImpl(
                 type = type,
                 priority = priority,
             )
-        } catch (e: OcrException.DetectionUnavailable) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // Same policy as scanOwOcrOrFallback: any local failure — no detector installed, a
+            // session that will not initialize, an ORT error, a bad tensor shape — falls back to
+            // GLENS rather than failing the page. A local engine that is broken must not be able to
+            // take Read-Aloud down with it.
             if (!useFallbackModelsPref.get()) {
                 throw e
             }
             logcat(LogPriority.WARN, e) {
-                "OCR scanning redirected to glens because local detection is unavailable"
+                "OCR local scan failed, falling back to glens (${e::class.simpleName}: ${e.message})"
             }
             scanWithGlens(
                 chapterId = chapterId,
@@ -590,6 +642,53 @@ class OcrRepositoryImpl(
         }
     }
 
+    /**
+     * Adaptive hybrid: local PP-OCRv5 first, whole-page GLENS escalation when the local result
+     * cannot be trusted. The result is cached under [modelKey] (ADAPTIVE) so raising or lowering
+     * the confidence floor later does not silently re-key the cache (audit §3.5 option A: no new
+     * column, so `deleteDatabaseIfSchemaOutdated` cannot wipe cached pages).
+     */
+    private suspend fun scanAdaptive(
+        chapterId: Long,
+        pageIndex: Int,
+        image: OcrImage,
+        modelKey: OcrModel,
+        priority: OcrScanPriority,
+    ): OcrPageResult {
+        return try {
+            submitTask(priority.toQueuePriority()) {
+                image.useBitmap { bitmap ->
+                    val engine = hybridEngine()
+                    val page = engine.recognizePage(bitmap) {
+                        // Only reached on escalation, so an accepted page never touches the network.
+                        val cloud = engineFor(EngineType.GLENS) as GlensOcrEngine
+                        cloud.recognizePage(bitmap).regions
+                    }
+
+                    OcrPageResult(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        ocrModel = modelKey,
+                        imageWidth = bitmap.width,
+                        imageHeight = bitmap.height,
+                        regions = page.regions.mapIndexed { index, region ->
+                            OcrRegion(
+                                order = index,
+                                text = region.text,
+                                boundingBox = region.boundingBox,
+                                textOrientation = OcrTextOrientation.Horizontal,
+                            )
+                        },
+                    )
+                }
+            }.also { cacheStore.upsert(it) }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (isConnectivityFailure(error)) throw OcrException.ConnectionError(error)
+            throw error
+        }
+    }
+
     private fun cropBitmap(
         image: Bitmap,
         box: OcrBoundingBox,
@@ -702,6 +801,10 @@ class OcrRepositoryImpl(
 
             detEngine?.close()
             detEngine = null
+
+            ppOcrEngine?.close()
+            ppOcrEngine = null
+            hybridEngine = null
         }
     }
 }

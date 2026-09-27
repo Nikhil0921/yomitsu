@@ -45,6 +45,7 @@ dependencies {
 
     implementation(libs.androidx.sqlite.bundled)
     implementation(libs.litert)
+    implementation(libs.onnxruntime)
 
     implementation(libs.anki.android)
     implementation(libs.hoshidicts)

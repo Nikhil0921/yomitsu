@@ -29,6 +29,7 @@ import eu.kanade.domain.track.interactor.TrackChapter
 import eu.kanade.tachiyomi.data.dictionary.audio.DictionaryAudioPlayerImpl
 import eu.kanade.tachiyomi.data.dictionary.audio.DictionaryAudioRepositoryImpl
 import eu.kanade.tachiyomi.data.ocr.OcrChapterScanner
+import eu.kanade.tachiyomi.data.ocr.OcrModelDownloadManager
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceGateway
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceGatewayImpl
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
@@ -320,6 +321,7 @@ class DomainModule : InjektModule {
         addSingletonFactory { OcrChapterScanner(get<Application>(), get(), get(), get(), get(), get(), get(), get()) }
         addSingletonFactory { OcrScanManager(get<Application>(), get(), get(), get()) }
         addFactory { OcrQueueActions(get(), get()) }
+        addSingletonFactory { OcrModelDownloadManager(get<Application>()) }
         addFactory { OcrProcessor(get()) }
         addFactory { WithOcrScanSession(get()) }
         addFactory { ScanPageOcr(get()) }
