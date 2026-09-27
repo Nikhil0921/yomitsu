@@ -101,6 +101,9 @@ internal class OcrScanNotifier(
             OcrScanFailure.ChapterNotFound -> context.stringResource(MR.strings.chapter_not_found)
             OcrScanFailure.MangaNotFound -> context.stringResource(MR.strings.ocr_scan_manga_not_found)
             OcrScanFailure.NoPages -> context.stringResource(MR.strings.page_list_empty_error)
+            OcrScanFailure.PageListTimeout -> context.stringResource(
+                MR.strings.ocr_preprocess_page_list_timeout,
+            )
             is OcrScanFailure.PagesSkipped -> context.stringResource(
                 MR.strings.ocr_preprocess_pages_skipped,
                 failure.skipped,

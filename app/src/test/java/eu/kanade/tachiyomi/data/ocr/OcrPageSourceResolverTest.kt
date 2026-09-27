@@ -85,6 +85,39 @@ class OcrPageSourceResolverTest {
         coVerify(exactly = 1) { httpSource.getPageList(any()) }
     }
 
+    /**
+     * The memo was a single slot, so a next-chapter prefetch interleaving with the chapter being
+     * read evicted the current chapter's page list and every subsequent resolve went back to the
+     * network - once per scanned page, inside the acquire path that has a 30 s budget
+     * (docs/audits/full-ocr-pipeline-audit.md §3).
+     */
+    @Test
+    fun interleavingAnotherChapterDoesNotEvictMemoizedPages() = runTest {
+        coEvery { httpSource.getPageList(any()) } returns pages("a", "b")
+
+        resolver.resolve(manga(), chapter(8084L))
+        resolver.resolve(manga(), chapter(9999L))
+        val third = resolver.resolve(manga(), chapter(8084L))
+
+        assertEquals(2, third.pages.size)
+        // Two chapters, two fetches - the third resolve reuses 8084's memoized list.
+        coVerify(exactly = 2) { httpSource.getPageList(any()) }
+    }
+
+    @Test
+    fun memoizedPagesAreBoundedToTheMostRecentChapters() = runTest {
+        coEvery { httpSource.getPageList(any()) } returns pages("a", "b")
+
+        val ids = (1L..MEMOIZED_CHAPTER_CAPACITY + 2L).toList()
+        ids.forEach { resolver.resolve(manga(), chapter(it)) }
+        // The newest chapter is still memoized; the oldest was evicted by the cap and refetched.
+        resolver.resolve(manga(), chapter(ids.last()))
+        resolver.resolve(manga(), chapter(ids.first()))
+
+        // ids.size fetches, +0 for the newest, +1 for the evicted oldest.
+        coVerify(exactly = ids.size + 1) { httpSource.getPageList(any()) }
+    }
+
     @Test
     fun differentChapterDoesNotReuseMemoizedPages() = runTest {
         coEvery { httpSource.getPageList(any()) } returns pages("a", "b")

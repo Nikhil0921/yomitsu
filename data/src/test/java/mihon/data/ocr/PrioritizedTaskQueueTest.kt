@@ -3,9 +3,13 @@ package mihon.data.ocr
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -224,6 +228,58 @@ class PrioritizedTaskQueueTest {
             listOf("low-1-start", "low-1-end", "high", "normal", "low-2"),
             events,
         )
+    }
+
+    /**
+     * A queued task is owned by whoever submitted it: cancelling that caller must cancel the work.
+     *
+     * The queue used to detach every task into the queue's own long-lived scope and run it to
+     * completion regardless, which is why a `withTimeoutOrNull` around a scan *abandoned* the
+     * upload instead of stopping it - the page was counted as skipped while a doomed 100 s GLENS
+     * call kept holding a background slot (docs/audits/full-ocr-pipeline-audit.md §2, F1.6), and
+     * `prefetchJob.cancel()` could not stop already-queued scans, which is what produced the 29%
+     * duplicate-scan enqueues.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun cancellingTheSubmitterCancelsTheRunningTask() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val taskFinallyRan = CompletableDeferred<Unit>()
+        val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 1)
+
+        val submitter = launch {
+            queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
+                started.complete(Unit)
+                try {
+                    delay(Long.MAX_VALUE)
+                } finally {
+                    taskFinallyRan.complete(Unit)
+                }
+            }
+        }
+        started.await()
+
+        submitter.cancelAndJoin()
+
+        withTimeout(5_000) { taskFinallyRan.await() }
+        assertTrue(queue.isIdle(), "the cancelled task must release its slot")
+    }
+
+    /** A caller that completes normally must NOT take its task down with it. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun aSubmitterThatCompletesNormallyLetsItsTaskFinish() = runTest {
+        val taskRan = CompletableDeferred<Unit>()
+        val queue = PrioritizedTaskQueue(backgroundScope, maxConcurrentTasks = 1)
+
+        val submitter = launch {
+            queue.submit(PrioritizedTaskQueue.Priority.NORMAL) {
+                taskRan.complete(Unit)
+            }
+        }
+        submitter.join()
+
+        withTimeout(5_000) { taskRan.await() }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

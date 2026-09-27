@@ -3,6 +3,7 @@ package mihon.data.ocr
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -20,6 +21,16 @@ internal class PrioritizedTaskQueue(
         LOW,
     }
 
+    /**
+     * A queued task plus the job that asked for it. The task is launched as a child of that job so
+     * cancelling the submitter cancels the work, instead of leaving it running to completion in the
+     * queue's long-lived scope.
+     */
+    private class QueuedTask(
+        val owner: Job?,
+        val run: suspend () -> Unit,
+    )
+
     private data class ActiveTask(
         val id: Int,
         val priority: Priority,
@@ -29,9 +40,9 @@ internal class PrioritizedTaskQueue(
     )
 
     private val mutex = Mutex()
-    private val highPriorityTasks = ArrayDeque<suspend () -> Unit>()
-    private val normalPriorityTasks = ArrayDeque<suspend () -> Unit>()
-    private val lowPriorityTasks = ArrayDeque<suspend () -> Unit>()
+    private val highPriorityTasks = ArrayDeque<QueuedTask>()
+    private val normalPriorityTasks = ArrayDeque<QueuedTask>()
+    private val lowPriorityTasks = ArrayDeque<QueuedTask>()
 
     private var activeTasks = 0
     private var workerJob: Job? = null
@@ -65,8 +76,11 @@ internal class PrioritizedTaskQueue(
     ): T {
         val result = CompletableDeferred<T>()
         var enqueuedAt = 0L
+        // The job that asked for this work. Captured here because the task body runs later, on a
+        // coroutine the submitter has no reference to.
+        val owner = currentCoroutineContext()[Job]
 
-        val task: suspend () -> Unit = {
+        val task = QueuedTask(owner) {
             if (!result.isCancelled) {
                 val startedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
                 val taskId = System.identityHashCode(result)
@@ -158,11 +172,25 @@ internal class PrioritizedTaskQueue(
             } ?: break
 
             // Launch instead of running inline: up to maxConcurrentTasks tasks overlap
-            // (remote GLENS scans are network-bound). The queue task itself owns its
-            // bitmap lifecycle, so an abandoned await never cancels the running scan.
-            scope.launch {
+            // (remote GLENS scans are network-bound).
+            //
+            // The task is parented to the SUBMITTER's job, not to [scope], so cancelling the
+            // caller cancels the work it asked for. It used to be the other way round: every task
+            // ran to completion in the queue's long-lived scope, so a `withTimeoutOrNull` around a
+            // scan *abandoned* the upload instead of stopping it — the caller counted the page as
+            // skipped while a doomed 100 s GLENS call kept holding a background slot
+            // (docs/audits/full-ocr-pipeline-audit.md §2, F1.6) — and `prefetchJob.cancel()`
+            // could not stop already-queued scans, which is what produced the 29% duplicate-scan
+            // enqueues. The submitter's own bitmap lifecycle and cache write are unaffected either
+            // way, because they live inside the block and run in its `finally`.
+            val taskContext = if (task.owner != null) {
+                scope.coroutineContext + task.owner
+            } else {
+                scope.coroutineContext
+            }
+            CoroutineScope(taskContext).launch {
                 try {
-                    task()
+                    task.run()
                 } finally {
                     val becameIdle = mutex.withLock {
                         activeTasks--

@@ -1205,6 +1205,7 @@
     <string name="ocr_preprocess_queued">Queued</string>
     <string name="ocr_preprocess_progress">%1$s - %2$d/%3$d pages scanned</string>
     <string name="ocr_preprocess_completed">%1$s scanned</string>
+    <string name="ocr_preprocess_page_list_timeout">Timed out loading the chapter's page list</string>
     <string name="ocr_preprocess_pages_skipped">%1$d of %2$d pages scanned, the rest will be retried</string>
     <string name="ocr_preprocess_failed">%1$s could not be scanned</string>
     <string name="ocr_scan_manga_not_found">Manga not found</string>

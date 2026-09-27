@@ -242,10 +242,76 @@ class OcrChapterScannerTest {
         assertTrue(errors.isEmpty(), "a clean scan must not report an error, got $errors")
     }
 
+    /**
+     * A page whose image never arrives must not stall the whole chapter scan. `openBitmap()`
+     * reached the source with the SOURCE's own timeouts, so a stalled source call had no bound at
+     * all: measured 7.1 s on a good day, unbounded on a bad one, and it was the "hangs on page 1"
+     * shape from docs/audits/full-ocr-pipeline-audit.md §2 (F1.5).
+     */
+    @Test
+    fun pageImageThatNeverArrivesIsBoundedAndThePageIsSkipped() = runTest {
+        val fixture = createFixture(
+            pages = 3,
+            pageScanTimeout = 100.milliseconds,
+            openBitmapBehavior = { index, stub ->
+                if (index == 1) {
+                    delay(60_000)
+                }
+                stub
+            },
+        ) { _, pageIndex -> pageResult(pageIndex) }
+
+        val completed = mutableListOf<OcrChapterScanProgress>()
+        val errors = mutableListOf<OcrChapterScanError>()
+        val ok = fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = { completed += it },
+            onError = { errors += it },
+        )
+
+        assertEquals(false, ok)
+        assertEquals(2, completed.single().processedPages)
+        assertEquals(OcrScanFailure.PagesSkipped(skipped = 1, total = 3), errors.single().failure)
+        // The pages around the stalled one still ran.
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(0), any()) }
+        coVerify(exactly = 0) { fixture.scanPageOcr.await(eq(1L), eq(1), any()) }
+        coVerify(exactly = 1) { fixture.scanPageOcr.await(eq(1L), eq(2), any()) }
+    }
+
+    /** Same bound for the page-list resolution, which is the first network call of a chapter. */
+    @Test
+    fun pageListResolutionThatNeverReturnsFailsTheChapter() = runTest {
+        val fixture = createFixture(
+            pages = 3,
+            pageScanTimeout = 100.milliseconds,
+            resolveBehavior = {
+                delay(60_000)
+                ResolvedOcrPages(emptyList())
+            },
+        ) { _, pageIndex -> pageResult(pageIndex) }
+
+        val errors = mutableListOf<OcrChapterScanError>()
+        val ok = fixture.scanner.scanChapter(
+            chapterId = 1L,
+            onProgress = {},
+            onComplete = {},
+            onError = { errors += it },
+        )
+
+        assertEquals(false, ok)
+        // Not NoPages: the stub completes under runTest's virtual clock, so only a real bound on
+        // resolve() can produce the timeout failure. Asserting "failed" alone would pass either way.
+        assertEquals(OcrScanFailure.PageListTimeout, errors.single().failure)
+        coVerify(exactly = 0) { fixture.scanPageOcr.await(any(), any(), any()) }
+    }
+
     private fun createFixture(
         pages: Int = 3,
         pageScanTimeout: Duration = 30_000.milliseconds,
         onlineCalls: Int = Int.MAX_VALUE,
+        openBitmapBehavior: (suspend (Int, Bitmap) -> Bitmap?)? = null,
+        resolveBehavior: (suspend () -> ResolvedOcrPages)? = null,
         scanBehavior: suspend (chapterId: Long, pageIndex: Int) -> OcrPageResult,
     ): Fixture {
         val context = mockk<Context>(relaxed = true)
@@ -314,11 +380,16 @@ class OcrChapterScannerTest {
         val pageInputs = (0 until pages).map { index ->
             OcrPageInput(
                 pageIndex = index,
-                openBitmap = { pageBitmap },
+                openBitmap = { openBitmapBehavior?.invoke(index, pageBitmap) ?: pageBitmap },
                 openBitmapRegion = { null },
             )
         }
-        coEvery { pageSourceResolver.resolve(any(), any()) } returns ResolvedOcrPages(pageInputs)
+        val resolvedPages = ResolvedOcrPages(pageInputs)
+        if (resolveBehavior == null) {
+            coEvery { pageSourceResolver.resolve(any(), any()) } returns resolvedPages
+        } else {
+            coEvery { pageSourceResolver.resolve(any(), any()) } coAnswers { resolveBehavior() }
+        }
 
         val downloadPreferences = mockk<DownloadPreferences>()
         val downloadOnlyOverWifi = mockk<Preference<Boolean>>()

@@ -38,8 +38,23 @@ internal class OcrPageSourceResolver(
     // page list per chapter so repeats reuse it. Each resolve() still builds
     // fresh OcrPageInput wrappers + ResolvedOcrPages, so callers' use{} pairing
     // and per-scan imageUrl state are unaffected.
+    //
+    // This was a SINGLE slot, so a next-chapter prefetch interleaving with the chapter being read
+    // evicted the current chapter's list and every later resolve went back to the network - once
+    // per scanned page, inside the acquisition path that has a 30 s budget. A small LRU of the most
+    // recent chapters removes the thrash while staying bounded.
+    // ponytail: raise MEMOIZED_CHAPTER_CAPACITY if users read more than this many chapters
+    // concurrently; it is a list of URLs, not page images.
     private val remoteResolveMutex = Mutex()
-    private var memoizedRemotePages: MemoizedRemotePages? = null
+    private val memoizedRemotePages = object : LinkedHashMap<Long, List<Page>>(
+        /* initialCapacity = */ MEMOIZED_CHAPTER_CAPACITY,
+        /* loadFactor = */ 0.75f,
+        /* accessOrder = */ true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, List<Page>>?): Boolean {
+            return size > MEMOIZED_CHAPTER_CAPACITY
+        }
+    }
 
     suspend fun resolve(
         manga: Manga,
@@ -147,19 +162,19 @@ internal class OcrPageSourceResolver(
         // the fetch; the rest reuse the memoized list. Failures/cancellation
         // propagate without storing, so the next resolve retries.
         val fetched = remoteResolveMutex.withLock {
-            val memoized = memoizedRemotePages
-            if (memoized != null && memoized.chapterId == chapter.id) {
+            val memoized = memoizedRemotePages[chapter.id]
+            if (memoized != null) {
                 if (BuildConfig.DEBUG) {
                     logcat {
                         "OCR resolveRemote memo hit chapter=${chapter.id} " +
-                            "pages=${memoized.pages.size}"
+                            "pages=${memoized.size} cached=${memoizedRemotePages.size}"
                     }
                 }
-                return@withLock memoized.pages
+                return@withLock memoized
             }
             val fresh = cachedPages ?: source.getPageList(chapter.toSChapter())
             if (fresh.isNotEmpty()) {
-                memoizedRemotePages = MemoizedRemotePages(chapter.id, fresh)
+                memoizedRemotePages[chapter.id] = fresh
             }
             fresh
         }
@@ -337,10 +352,11 @@ internal class OcrPageSourceResolver(
 
 private val DOWNLOAD_WAIT_TIMEOUT = 15.seconds
 
-private data class MemoizedRemotePages(
-    val chapterId: Long,
-    val pages: List<Page>,
-)
+/**
+ * How many chapters keep a memoized page list. Two is what the OCR paths actually need (the
+ * chapter being read plus the next-chapter prefetch); the extra headroom absorbs a swipe.
+ */
+internal const val MEMOIZED_CHAPTER_CAPACITY = 4
 
 data class OcrPageInput(
     val pageIndex: Int,
