@@ -57,7 +57,347 @@ Last device:    2026-09-26 READ-ALOUD RESILIENCY VERIFICATION PASS (SM_M066B) �
                   S2 OcrScanJob ×3, S3 8× warm-skip 0ms vs 257ms, S5 759/760 HTTP200
                   cold-batch p50 546ms, S1 HIGH zero-wait ×2; 1× HTTP 500 no-retry = WATCH).
                   2026-09-19 STAGE 4L PASS (ch8447 p0–15, 160×HTTP200).
-Last session:   2026-09-26 OcrExclusionMatcher O(n^3) -> linear (12.3s stall eliminated,
+Last session:   2026-09-27 ADAPTIVE HYBRID ESCALATION VERIFIED — final numbers, 68 real pages.
+                  GATES: `spotlessCheck testDebugUnitTest` = **BUILD SUCCESSFUL 3m16s — 512 tests,
+                  0 failures**. No DB change. No commit. **GLENS remains the code default**
+                  (`OcrPreferences.ocrModel()` untouched); PPOCR/ADAPTIVE are opt-in.
+                  MEASURED (post-fix window only, i.e. from the first `init ok` at 17:45:40 —
+                  everything earlier in the capture is the retained ring buffer from the PRE-fix
+                  process, pid 19017, and is excluded):
+                  **pages 68 · local accepted 7 (10.3%) · escalated to cloud 61 (89.7%) · local
+                  engine failures 0. ESCALATION RATE = 61/68 = 89.7%.** The `OcrTensorSize` fix is
+                  confirmed on hardware: **1094 recognition calls, all with height exactly 48**
+                  (27 distinct widths from 48 to 320); before the fix every call was `in=48x48` or
+                  threw. `init ok detIn=x recIn=x recOut=fetch_name_0 classes=438` appears 3x, once
+                  per process — single init, no re-initialization storm (was 23 attempts / 649 graph
+                  optimization runs).
+                  **LATENCY, post-fix, real pages under concurrent load: detection n=68 p50 = 393 ms,
+                  p90 = 883 ms, p99 = 1481 ms, max 2727 ms (64x960 p50 381 ms on 57 of 68 pages;
+                  960x640 p50 697 ms); recognition n=1094 p50 = 61 ms, p90 = 202 ms, p99 = 659 ms,
+                  mean 100 ms.** Isolated hardware benchmark (two runs): det p50 80–110 ms,
+                  p90 548–552 ms; rec p50 47–48 ms, p90 57–59 ms. **Detection misses the 250 ms
+                  budget at p90 in every configuration; recognition is comfortably inside it.**
+                  **WHY 89.7% ESCALATE — one constant, not a bug: `meanCharConfidence < 0.80`
+                  tripped on 61 of 61 escalated pages (100%), median confidence 0.557.** Every other
+                  router threshold is effectively never reached: chars/region < 1.5 on 0 pages,
+                  nonLatin > 0.15 on 0, garbage > 0.30 on 0, boxH < 0.008 on 5 (8%). The 0.80 floor
+                  came from the audit's *unmeasured* table, not from a measurement, and the `en`
+                  recognizer simply does not reach it on real manga crops. Do NOT "fix" this by
+                  lowering the constant to make the number look good: the honest next step is to
+                  compare local text against GLENS text on the same pages and set the floor from
+                  measured accuracy. The 7 accepted pages scored conf 0.80–0.93.
+                  **FINAL ARCHITECTURAL DECISION: Online (GLENS) stays the default engine; PP-OCRv5
+                  (Local Fast OCR) and Adaptive Hybrid remain opt-in choices in Settings → Studies →
+                  Text recognition.** Two independent measured reasons, both from the audit's own
+                  pre-registered criteria: (a) audit R1 — "an escalation rate above ~20% means the
+                  local model is not earning its place and the hybrid is a pessimization"; 89.7% is
+                  4.5x that threshold, so in Adaptive Hybrid the local pass is pure added latency;
+                  (b) audit §5 Phase 1 kill-switch — "if detection alone is > 400 ms/page the
+                  local-first thesis dies"; detection p50 is 393 ms isolated-adjacent and 788 ms
+                  under the earlier heavier load, with p90 883 ms. The engine is CORRECT and remains
+                  defensible as the only OCR path that needs no network; what is rejected is making
+                  it the default. Any further work belongs in NNAPI (audit R4), a smaller detector,
+                  or an explicitly multi-second page budget.
+Last session:   2026-09-27 LATENCY METRICS EXTRACTED + BENCHMARK RUN + ONE MORE CRASH FIXED.
+                  GATES (docker vsc-yomihon-e24e3bd7, -Xmx4g, BOTH volumes): `spotlessCheck
+                  testDebugUnitTest` = BUILD SUCCESSFUL 3m — **512 tests, 0 failures**; `:app:assembleDebug`
+                  BUILD SUCCESSFUL 2m27s, `install -r` Success, models intact in filesDir.
+                  **SECOND CRASH FOUND AND FIXED (the one the logcat metric pull exposed).** The
+                  user's real-content run produced `ORT_INVALID_ARGUMENT ... index: 2 Got: 192
+                  Expected: 48` (also 56/64/72/…/320) on 19 pages. Index 2 is the recognizer's
+                  HEIGHT, which the model pins at 48 — and the values fed were my *widths*. Root
+                  cause: `PpOcrPreprocess.recognitionInputSize` returned `Pair(height, width)` while
+                  `detectionInputSize` returned `Pair(width, height)`, and the engine destructured
+                  BOTH as `(width, height)`. Every recognition tensor was transposed; only square
+                  crops (width clamped to 48) survived by luck, which is why the earlier rec samples
+                  were all `in=48x48`. FIX: both functions now return a named `OcrTensorSize(width,
+                  height)` — a `Pair` cannot express which is which, so the ambiguity WAS the defect —
+                  and the engine reads `size.width`/`size.height` explicitly. Confirmed on hardware:
+                  the benchmark now completes **47 recognition calls** on real text crops.
+                  **MEASURED LATENCY, real manga pages, concurrent app session (n=32 det, n=10 rec):
+                  detection p50 = 788 ms, p90 = 1926 ms, p99 = 4009 ms, max 4009 ms; recognition
+                  p50 = 243 ms, p90 = 380 ms, p99 = 569 ms.** Target is 250 ms. By input size:
+                  64x960 (61k px) p50 506 ms; 224x960 (215k) 788 ms; 960x640 (614k) p50 2302 ms —
+                  cost scales with input area, and 3-4 scans run concurrently on separate threads,
+                  which is why real-world p50 is ~5x the isolated figure.
+                  **ISOLATED HARDWARE BENCHMARK (androidTest, one page at a time, pages drawn
+                  in-process so no fixture files are needed), two consecutive runs:
+                  `pages=20 boxes=47 det p50=110ms p90=548ms | rec n=47 p50=47ms p90=59ms` and
+                  `pages=20 boxes=47 det p50=80ms p90=552ms | rec n=47 p50=48ms p90=57ms`.
+                  So detection p50 clears 250 ms in isolation but p90 is reproducibly ~2.2x OVER it,
+                  while recognition (47-48 ms p50, 57-59 ms p90) is comfortably inside. The gate
+                  FAILS on detection p90: `detection p90 552ms exceeds the 250ms budget (p50 80ms)`.
+                  **ADAPTIVE HYBRID ESCALATION RATE = 19/19 pages = 100%**, all with
+                  "local engine unavailable … index: 2 Got: …" — i.e. every escalation was the
+                  transposed-tensor bug, not the quality router. Router-accepted pages: 0.
+                  Quality-based escalations: 0. **THE REAL ESCALATION RATE IS UNKNOWN until a re-test
+                  with the tensor fix.**
+                  **VERDICT AGAINST THE AUDIT'S OWN PRE-REGISTERED KILL-SWITCH** (audit §5 Phase 1:
+                  "if detection alone is > 400 ms/page, the local-first thesis dies"): under real app
+                  conditions detection p50 is 788 ms = 2x the kill-switch, and even isolated p90 is
+                  548 ms. **The local-first thesis does not hold at 250 ms/page on SM_M066B.** Keeping
+                  the code is still defensible (it is the only offline path and it is correct now),
+                  but ADAPTIVE must not be made the default and PPOCR/ADAPTIVE should stay opt-in.
+                  Benchmark note: the harness previously required 20+ fixture PNGs pushed to
+                  `externalFilesDir/ocr_benchmark/`, and Android's PNG decoder rejected the
+                  hand-rolled fixtures, so the gate silently skipped; it now draws its own pages with
+                  `Canvas.drawText`, which also means real glyphs exercise recognition.
+                  Log capture note: the on-device capture died at 16:25; restarted as
+                  `/sdcard/Download/logcat-20260927-run2.log`.
+                  STILL PENDING: a re-test for the true escalation rate and for recognition on real
+                  page crops (all rec samples so far are square 48x48 crops from the buggy build).
+Last session:   2026-09-27 PP-OCRv5 CRASH DIAGNOSED AND FIXED (user-authorized, NO COMMIT) — the
+                  first device run failed every local page with "recognizer exposes 0 classes".
+                  GATES (docker vsc-yomihon-e24e3bd7, -Xmx4g, BOTH volumes): `spotlessCheck
+                  testDebugUnitTest :app:assembleDebug` = **BUILD SUCCESSFUL 2m47s — 511 tests, 0
+                  failures** (was 499, +12). Installed on SM_M066B (`install -r` Success).
+                  **ROOT CAUSE = Kotlin silently downcasting an ONNX Runtime Java platform type.**
+                  `rec.outputInfo[name] as? TensorInfo` — in ORT 1.30.0 `NodeInfo` is a plain
+                  class and `TensorInfo implements ValueInfo`, so the correct chain is
+                  `outputInfo[name]?.info as? TensorInfo`. Because Java types are *platform types*
+                  to Kotlin the wrong cast COMPILES, and at runtime it is ALWAYS null, so my own
+                  loud-failure guard fired with `classes = 0` and threw `InitializationError` on
+                  every page. Proved offline before touching the device: javap on the AAR shows
+                  `NodeInfo.getInfo(): ValueInfo` and `TensorInfo implements ValueInfo`, and a
+                  host-side probe with the SAME wrong cast **fails to compile** ("NodeInfo cannot be
+                  converted to TensorInfo") under plain javac.
+                  Two more latent faults the same probe exposed, which would have fired the moment
+                  RC1 was fixed: ORT returns the det output `[1,1,H,W]` as `float[][][][]` and the
+                  rec output `[1,40,438]` as `float[][][]`, but the code assumed 2-D and 1-D. Both
+                  `as?` casts erase to `Object[]` and therefore SUCCEED on the wrong shape — the
+                  det path would have silently produced an all-zero probability map (zero boxes,
+                  no error). And **the dict is 436 characters while the model emits 438 classes**:
+                  PaddleOCR's `CTCLabelDecode` builds `['blank'] + dict + [' ']`, so class 437 is a
+                  literal space. Unhandled, it was dropped, so words would have been glued together
+                  ("Helloworld") even after a successful init.
+                  FIXES: new pure `OcrTensorReader` (:domain) walks both nestings positionally with
+                  `is Array<*>` checks and returns null on a wrong shape; `PpOcrCharset.CLASS_COUNT`
+                  437 -> 438 with `SPACE_CLASS = 437` and decoder support for it; engine reads
+                  metadata through `NodeInfo.getInfo()`; init failure is now STICKY (it was
+                  re-running full ORT graph optimization on every page — 23 attempts, 649
+                  `CleanUnusedInitializersAndNodeArgs` lines, all under the shared local-engine
+                  lock, which is a real self-inflicted stall); `infer` failures and a null output
+                  shape now raise a domain exception instead of a raw ClassCastException;
+                  `HybridOcrEngine` treats a local failure as an ESCALATION TRIGGER (cancellation
+                  still propagates); `scanLocalOrFallback` now catches any non-cancellation
+                  throwable and falls back to GLENS, mirroring the existing `scanOwOcrOrFallback`.
+                  TESTS +12: `OcrTensorReaderTest` 9 (correct 4-D/3-D nestings, wrong-shape null,
+                  ragged null, no aliasing), 3 new CTC space-class tests, charset count 438.
+                  **GLENS "stall" IS NOT A LOCK LEAK AND NOT MINE**: `PrioritizedTaskQueue` releases
+                  its slot in a `finally`, and `OcrEngineLocks`/the engine mutex are exception-safe.
+                  Measured GLENS at 8.8–10.1 s per tile upload and **57–68 s per page** against
+                  `OCR_ACQUIRE_TIMEOUT_MS = 30 000`, so timeouts are expected; the 09-26 pass had a
+                  2.67 s median upload, so the network is currently ~4x slower. No network behaviour
+                  changed. The 9 chapters sitting in `ocr_preprocess_queue` state=ERROR are those
+                  failed runs and will be retried by the scanner.
+                  VERIFIED ON DEVICE (headless): models present at
+                  `files/app_ocr_models/pp_ocr_v5/v1/`, and the on-device SHA-256 of both files
+                  equals the pinned manifest exactly (a4319856…6e61d / b5f833df…0557f) — the
+                  on-demand download and its integrity check are proven working. The installed
+                  package no longer contains the ORT telemetry authority (0 occurrences).
+                  **STILL PENDING: the 250 ms number and the three-mode end-to-end run, which need
+                  a chapter read and therefore the user.** The interactive test is theirs; the
+                  container's adb cannot pair with the wireless device, so `connectedDebugAndroidTest`
+                  is not available to me.
+Last session:   2026-09-26 PHASES 1-3 IMPLEMENTED — PP-OCRv5 local engine, adaptive hybrid,
+                  model downloader, settings UI (user-authorized master task, NO COMMIT).
+                  SCOPE LOCK LIFTED: "local OCR engine reinstatement" (was REJECTED) — this master
+                  task is the explicit authorization the audit §8 asked for.
+                  GATES (docker vsc-yomihon-e24e3bd7, -Xmx4g, BOTH volumes):
+                  `spotlessCheck testDebugUnitTest :app:assembleDebug verifySqlDelightMigration`
+                  = **BUILD SUCCESSFUL 4m18s — 499 tests, 0 failures** (was 417, +82). No DB
+                  change (verifySqlDelightMigration still run for CI parity). One full-suite run
+                  failed on the PRE-EXISTING 09-26 perf guard `OcrExclusionMatcherTest > word
+                  matching stays linear` (7.12ms vs its 5ms wall-clock bound); in isolation the
+                  same test prints 2.45ms and passes, so it is container contention, NOT a
+                  regression. That guard is a 5ms wall-clock assertion in a shared 7GB container —
+                  treat it as a known flaky, do not loosen it without evidence.
+                  FOUR PREMISE CORRECTIONS (all verified, not assumed):
+                  (1) **LiteRT CANNOT load PP-OCRv5.** `libLiteRt.so` (litert 2.1.6) exposes only
+                  `TfLite*` symbols + `ml_drift/tflite/object_reader`; there is no ONNX parser, so
+                  `CompiledModel.create(path)` only accepts `.tflite`. PP-OCRv5 has no TFLite
+                  distribution at all (Paddle publishes `inference.json`+`inference.pdiparams` and
+                  ONNX). => added `com.microsoft.onnxruntime:onnxruntime-android:1.30.0`
+                  (Apache-2.0) to `libs.versions.toml` + `data/build.gradle.kts`. APK COST:
+                  `libonnxruntime.so` 32 332 128 B on arm64-v8a, 23 392 928 B armeabi-v7a,
+                  39 460 224 B x86, 39 448 520 B x86_64 — i.e. +32MB per arm64 APK, 0 bytes for
+                  the models (still an on-demand download). ORT telemetry is NOT
+                  neutral out of the box: `ai.onnxruntime.TelemetryInitializer` is a ContentProvider
+                  merged from the ORT manifest that runs at every app start from
+                  `ActivityThread.installContentProviders` — BEFORE `Application.onCreate`, so
+                  `setTelemetry(false)` could never prevent it. It loaded the .so, derived a device
+                  id from `android_id` + `Build.MANUFACTURER`/`MODEL`, registered a default network
+                  callback and a `battery_low` receiver, and handed the native 1DS stack an HTTP
+                  client (proved by javap on the AAR + a live device log). FIXED 2026-09-27 with a
+                  `tools:node="remove"` provider block in `app/src/main/AndroidManifest.xml` (only
+                  file touched); verified absent from all 5 merged manifests AND from the built APK
+                   manifest via aapt2. `setTelemetry(false)` is kept as a second layer.
+                  (2) MODELS ARE REAL AND PINNED. `PaddlePaddle/PP-OCRv5_mobile_det_onnx` =
+                  4 826 518 B sha256 a4319856…6e61d; `PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx` =
+                  7 848 423 B sha256 b5f833df…557f. Total 12 674 941 B = 12.1 MiB (~14 MB claim
+                  holds). Both hashes independently confirmed against the HF LFS oids AND against
+                  a local download. Graph I/O read out of the ONNX directly: input `x`, output
+                  `fetch_name_0`; det tail is `ConvTranspose.3`, rec tail is `Softmax.2` — so the
+                  rec head already emits probabilities and no softmax is needed on our side.
+                  (3) NO DICT DOWNLOAD NEEDED: the `en` recognizer's 436-character dict is embedded
+                  in the official `inference.yml`, copied verbatim into `PpOcrCharset.kt`.
+                  Two of its entries (U+1D462 `𝑢`, U+1D4D3 `𝜓`) are astral-plane, so the decode
+                  vocabulary is a code-point `List<String>` — a Kotlin `String` indexes UTF-16
+                  units and would have handed the decoder lone surrogates. `CLASS_COUNT = 437` is
+                  asserted against the model's real output width at engine init, so a
+                  model/dict mismatch throws `InitializationError` instead of decoding to garbage.
+                  (4) `TextRecognitionModelDialog.kt` DOES NOT EXIST and neither does
+                  `domain/.../ocr/engine/`. Real locations used: model selector =
+                  `OcrQueueScreen.kt` `ListPreferenceWidget` + `OcrModelExtensions.titleRes`;
+                  prefs = `domain/.../ocr/service/OcrPreferences.kt`; engines in `:data` (rules §2:
+                   framework code cannot live in `:domain`).
+                  WHAT LANDED — pure logic in `:domain`, unit-tested (82 new tests):
+                  `PpOcrAssets` (manifest+pins), `PpOcrCharset` (dict), `OcrModelDownloader` (pure
+                  installer: `.part` staging, whole-file SHA-256, atomic MANIFEST.json rename,
+                  NOT_DOWNLOADED/DOWNLOADING/DOWNLOADED/ERROR, `errorRetryable` for the worker
+                  policy), `PpOcrDbPostprocess` (8-connected flood fill, mean-score box threshold,
+                  PaddleOCR isotropic unclip, min-side + max-box caps, positional reading order —
+                  no OpenCV), `PpOcrCtcDecode` (greedy + mean peak probability = the only
+                  confidence in the stack), `PpOcrPreprocess` (det /32 grid ≤960 long side, rec
+                  48px height with 8x-stride width clamped to [48,320]), `OcrQuality`/`OcrQualityRouter`
+                  (the audit §3.3 table, one named threshold set) and `SpeechCleaner.isOcrGarbage`
+                  promoted from private to `internal` so the two layers share one garbage rule
+                   instead of duplicating it. `OcrModel` gains PPOCR + ADAPTIVE (free: the OCR cache
+                   stores the enum as a string, so no `.sqm` migration and no cache wipe).
+                  `:data`: `PpOcrV5Engine` (both ORT sessions, `det=`/`rec=` ms logged as
+                  `OCR(ppocr) Runtime:`, CPU threads 2..4 like FastOcrEngine, NNAPI left off),
+                  `HybridOcrEngine` (local pass -> router -> whole-page GLENS), and
+                  `OcrRepositoryImpl` wiring: `EngineType.PPOCR`, `engineFor`, a `detectionEngine()`
+                  that returns the real detector only when the weights are installed (otherwise the
+                  throwing stub keeps the existing FAST/GLENS redirect intact), `dispatchScan`
+                  branches, `scanAdaptive`, and PPOCR removed from the `recognizeText` LEGACY/FAST
+                   -> GLENS redirect. `OcrEngineLocks` maps PPOCR onto the existing `fastMutex`
+                  rather than adding a mutex tier.
+                  PHASE 2 DEVIATION, DELIBERATE: the task asked to "merge local and cloud bounding
+                  box results". NOT DONE. `OcrRegion.order` is reading-order truth for
+                  `SentenceSegmenter`, `SpeechPipeline` and tap-highlight, and two detectors cannot
+                  produce one coherent order; audit §3.7 forbids it and R1 flags the double-inference
+                  cost. Escalation is whole-page: the cloud result replaces the local one, cached
+                  under `OcrModel.ADAPTIVE`. Both were approved explicitly by the user.
+                  THE <=250ms GATE IS **UNMEASURED**. It cannot be a `testDebugUnitTest` assertion:
+                  onnxruntime-android ships no JVM artifact, the weights are an on-demand download
+                  (absent in CI), and container-x86 is not phone-ARM. Delivered instead:
+                  `data/src/androidTest/.../PpOcrV5EngineBenchmarkTest` (downloads, warms up, p90
+                  over >=20 pages, asserts 250ms, skips rather than lies) + the in-engine timing
+                  log. CI does not run androidTest. **Device pass on SM_M066B is PENDING** — the
+                  number does not exist yet, so the local-first thesis is unproven.
+                  `OcrPreferences.kt` UNCHANGED, deliberately: the model choice is a UI list, its
+                  default is already GLENS (correct), and the four prefs the audit proposed are all
+                  avoided on purpose — the manifest is the durable truth for "installed" (a pref
+                  would drift from the filesystem), auto-download contradicts "prompts if missing",
+                  `adaptiveLocalFirst` is a knob for behaviour the router does not have, and
+                  `adaptiveConfidenceFloor` is one constant edit away until measurement says the
+                  0.80 default is wrong. Phase 3 CLEANUP NOT DONE, and deliberately: the "FastOcrEngine panel detector
+                  stub" in the task is not a stub. `FastOcrEngine` is a working 507-line LiteRT
+                  implementation that is merely unreachable, and `UnavailableDetOcrEngine` is
+                  LOAD-BEARING — its `DetectionUnavailable` throw is exactly what routes
+                  FAST -> GLENS. Deleting either breaks routing and violates rules §10. The real
+                  dead weight is `FastOcrEngine` + `FastVocab*` + 21MB of `ocr_fast` assets, which
+                  audit §5 Phase 3 says to delete only after PP-OCRv5 is device-verified.
+                  DETECTION-ACCURACY CAVEAT: det normalization uses the upstream ImageNet
+                  mean/std and rec uses 0.5/0.5; both are single-sourced constants but UNVERIFIED
+                  on-device, as is the 960px long-side cap on tall webtoon strips.
+Last session:   2026-09-26 PHASE 0 IMPLEMENTED — skipped words / speech region classification
+                  (user-authorized, NO COMMIT, 2 source files + 3 test files, no DB change).
+                  GATES (docker vsc-yomihon-e24e3bd7, -Xmx4g, BOTH volumes):
+                  `spotlessCheck testDebugUnitTest :app:assembleDebug` = BUILD SUCCESSFUL
+                  3m23s — **417 tests, 0 failures** (was 405, +12); spotlessCheck green with
+                  NO spotlessApply. (One intermediate combined run failed with no captured
+                  cause — only the tail was kept; the identical command re-ran green, as do
+                  all three tasks individually. Same transient pattern as 09-25/09-26.)
+                  (1) `SpeechRegionClassifier`: the shape heuristics are GONE —
+                  `INTERJECTION = ^[A-Z' ]{2,6}$` + "uppercase AND <=8 letters AND has
+                  !?" could not tell "BOOM!!" from "STOP!!", so dialogue was being filed as
+                  SOUND_EFFECT/EXPRESSION and both default `false` => silently skipped.
+                  Replaced with two explicit token sets (SOUND_EFFECT_TOKENS 24 onomatopoeia,
+                  EXPRESSION_TOKENS 13 vocalizations), consulted ONLY for upper-case text
+                  (the pre-existing case gate, so "boom!!" stays dialogue as before).
+                  Anything not listed => DIALOGUE => spoken. Also deleted the dead
+                  `if (INTERJECTION.matches(text))` branch (upper-only regex, unreachable
+                  for lower case, looked like it covered it). "OK"/"NO"/"YES"/"HI"/"MEH"/
+                  "RUN"/"HELP"/"STOP!!"/"WHAT??"/"NO!"/"OKAY!"/"WAIT!" now DIALOGUE;
+                  "BOOM!!"/"WHAM!"/"BAM"/"CRASH"/"RUMBLE"/"AAAH"/"HMM" unchanged.
+                  (2) `TextPostprocessor`: `hasJapaneseText = text.any{ isJapaneseScript }`
+                  -> `japaneseDominant = isJapaneseDominant(text)` (counts JP vs other
+                  LETTERS, JP must outnumber them). One stray kana no longer full-width-
+                  converts a whole English line, which used to set dominantScript=OTHER and
+                  get the bubble deleted by skipForeignScript. The space rule now keys off
+                  the same flag, so a Latin-dominant line keeps its spaces next to a stray
+                  kana ("I'm ready こんにちは" stays intact instead of "I'mready こ").
+                  (3) `dominantScript`: full-width Ａ-Ｚ/ａ-ｚ now counts as LATIN
+                  (`isFullWidthLatin()`, codepoint ranges 0xFF21-0xFF3A / 0xFF41-0xFF5A —
+                  deliberately NOT by UnicodeBlock, so full-width katakana still counts CJK).
+                  This heals pages ALREADY cached with full-width text, which the
+                  postprocessor fix alone cannot reach. TDD: 5 domain + 2 data tests failed
+                  first for the right reasons, one initial data expectation of mine was wrong
+                  (JP-dominant lines also full-width the digits: "こんにちは 1" ->
+                  "こんにちは１") and the TEST was corrected, not the code. NOT DONE (deliberately
+                  out of Phase 0 scope): the GLENS `DEFAULT_CLIENT_LANGUAGE="ja"` /
+                  `"Asia/Tokyo"` hard-code and the `parseResponsePage` region REORDER
+                  (audit D3, needs a device capture first) and the IoU dedupe text-precondition
+                  (audit D4). Device verification of the words fix is still PENDING.
+Last session:   2026-09-26 READ-ONLY audit: PP-OCRv5 local engine + Adaptive Hybrid +
+                  skipped-words root cause (docs/audits/ppocrv5-hybrid-audit.md). No source
+                  changes, no gates run. THREE PREMISE CORRECTIONS: (1) `OcrPostProcessor.kt`
+                  does not exist — it is `data/.../TextPostprocessor.kt`; (2) the 09-26 S4 verdict
+                  was specifically "no text-DETECTION model + JP-vocab recognizer", and PP-OCRv5
+                  Mobile supplies the missing DB detector + an `en` rec model, so the S4 blocker is
+                  resolvable in principle (scope lock still REJECTED, needs explicit lift);
+                  (3) NO CONFIDENCE EXISTS ANYWHERE — `OcrBoundingBox`/`OcrRegion`/GLENS
+                  proto parse/OCR cache all lack a score, so an adaptive gate can only be
+                  local-score -> cloud escalation, never cloud-arbitrated agreement.
+                  SKIPPED WORDS ROOT CAUSE IS THE SPEECH LAYER, NOT OCR: primary =
+                  `SpeechRegionClassifier.kt:54-56` classifies upper-case <=8-letter+emphasis as
+                  SOUND_EFFECT and `^[A-Z' ]{2,6}$` as EXPRESSION, and BOTH prefs default
+                  `false` (`TtsPreferences.kt:35,37`) => "OK"/"NO"/"WHAT??"/"STOP!!" are never
+                  spoken, while multi-word bubbles survive (exact reported shape). Secondary =
+                  `TextPostprocessor.kt:205` full-width-converts a whole line if it contains ONE
+                  kana, and `dominantScript` then returns OTHER -> `skipForeignScript` deletes the
+                  whole bubble. Third = GLENS hard-codes `DEFAULT_CLIENT_LANGUAGE="ja"` /
+                  `"Asia/Tokyo"` (`:1044-1045`), so one stray JP line flips an English page into
+                  the JP pipeline (`:467-484`) which REORDERS regions and can delete a line via
+                  `filterRuby` (:668-715). PROVEN there is NO length/word-count filter in either
+                  OCR path. LiteRT verified via javap on the shipped AAR: `CompiledModel.create(
+                  String path, Options, Environment)` loads from an absolute path (on-demand
+                  download needs zero new deps) and `Accelerator.NPU/GPU` exist. PP-OCRv5 plan is
+                  3 phases; Phase 0 (words bug, no new engine) is separable and is the highest
+                  value-per-diff item. Phase 1 gates on a MEASURED det-only <=250ms/page, not the
+                  "~200ms" assumption (no local OCR timing exists in any capture).
+Last session:   2026-09-26 Single-letter OCR sanitizer + OCR model menu cleanup
+                  (user-authorized, NO COMMIT; HEAD had advanced to 035989c27).
+                  (1) New pure domain util mergeSpacedSingleLetters() in
+                  domain/.../mihon/domain/ocr/model/OcrTextSanitizer.kt; regex
+                  SPACED_LETTER_RUN = (?<![A-Za-z])[A-Za-z](?:[ ]+[A-Za-z])+(?![A-Za-z]). The TRAILING LOOKAHEAD is
+                  load-bearing: it is what stops "This is a test" being corrupted (the engine can
+                  match "a t" but the following "e" fails the lookahead, so "test" is never
+                  truncated); lookbehind stops a match starting mid-word; a single letter never
+                  matches. ASCII letters only (1 2 3 / 5 x 3 / U.S.A untouched), spaces are the
+                  only separator (newlines/tabs NOT merged), length<3 short-circuits. Known
+                  limitation documented: shape-only, so letter-spaced English ("I a m") also
+                  collapses to "Iam". Wired as ONE line in SpeechPipeline.toSpeakableSentences,
+                  AFTER SpeechCleaner so its heuristics still see raw text; deliberately not at
+                  scan time (would mutate cached OCR text, need cache invalidation, and miss
+                  cached pages).
+                  (2) Menu: OcrModel.LEGACY removed from OcrQueueScreen entries (hidden —
+                  ListPreferenceWidget has no per-entry enable and adding one would touch a
+                  shared widget used by many screens); OcrPreferences.ocrModel() default
+                  LEGACY -> GLENS (safe: no test depends on it, and engineFor(LEGACY) already
+                  returns the GLENS engine so it is behaviour-neutral); base strings only —
+                  ocr_model_fast -> "Fast (local model, in development)", ocr_model_legacy ->
+                  "Legacy (deprecated)". GLENS + OWOCR untouched. Per the 09-26 audit FAST
+                  cannot run standalone (no text-detection model), so labelling is the honest
+                  minimum the task allowed.
+                  Tests +11 (OcrTextSanitizerTest 9, SpeechPipelineLetterMergeTest 2 pinning the
+                  utility is actually wired in). GATES (docker, -Xmx4g, both volumes):
+                  spotlessCheck + testDebugUnitTest + :app:assembleDebug BUILD SUCCESSFUL 4m5s —
+                  405 tests, 0 failures (was 394); spotlessCheck green with NO spotlessApply
+                  needed. 4 files modified + 3 new. No DB change.
+                  Prior 2026-09-26 OcrExclusionMatcher O(n^3) -> linear (12.3s stall eliminated,
                   user-authorized, NO COMMIT). Real path is
                   domain/src/main/java/mihon/domain/ocr/model/OcrExclusionMatcher.kt (NOT
                   ui/reader/ocr/). Measured TDD: 16 WORD zones x 16 regions x 60 tokens =
@@ -146,6 +486,44 @@ Last session:   2026-09-26 OcrExclusionMatcher O(n^3) -> linear (12.3s stall eli
                   Prior S1+S2+S3+S5 batch (09-25) also uncommitted.
 ```
 
+## Session task log — PP-OCRv5 local OCR, 2026-09-26/27 (all complete, nothing committed)
+
+Single place listing everything finished in this session. Detail lives in `memory.md` (recent +
+durable rules) and `history/session-logs.md` (full records); the `Last session` entries above carry
+the per-turn evidence.
+
+| # | Completed task | Outcome / evidence |
+|---|---|---|
+| 1 | **Phase 0 — skipped words** (earlier in session) | `SpeechRegionClassifier` shape heuristics replaced with 2 lexical token sets; `TextPostprocessor` Japanese-dominance; full-width Latin counted as Latin. 417 tests green. |
+| 2 | **Phase 1 — on-demand model downloader** | `OcrModelDownloader` (`:domain`, pure): `.part` staging, whole-file SHA-256, atomic `MANIFEST.json`, 4 states + `errorRetryable`. 15 tests. |
+| 3 | **Phase 1 — model manifest pinned** | Official PaddlePaddle ONNX exports, hashes confirmed against HF LFS oids *and* a local download: det 4 826 518 B `a4319856…`, rec-en 7 848 423 B `b5f833df…`, 12 674 941 B total. 6 tests. |
+| 4 | **Phase 1 — pure inference logic** | `PpOcrDbPostprocess` (8-connected flood fill, no OpenCV), `PpOcrCtcDecode`, `PpOcrPreprocess`, `PpOcrCharset`. 39 tests. |
+| 5 | **Phase 1 — local engine** | `PpOcrV5Engine` on ONNX Runtime (LiteRT provably cannot load ONNX). Wired into `OcrRepositoryImpl` (`EngineType.PPOCR`, real `detectionEngine`, locks reuse `fastMutex`). |
+| 6 | **Phase 2 — adaptive hybrid** | `OcrQualityRouter` (`:domain`, 15 tests) + `HybridOcrEngine` + `scanAdaptive`. Whole-page escalation, **no local/cloud merge** (order invariant), user-approved. |
+| 7 | **Phase 3 — settings UI** | `OcrQueueScreen` 4-entry model list + download/progress/retry/delete row; `OcrModelExtensions` titles; 12 new i18n strings (base only). |
+| 8 | **Phase 3 — download worker** | `OcrModelDownloadJob` mirrors `OcrScanJob` (same shape, `KEEP`, reused channel, retry-vs-fail on `errorRetryable`). |
+| 9 | **Gates after Phases 1-3** | `spotlessCheck testDebugUnitTest :app:assembleDebug verifySqlDelightMigration` = SUCCESS, 499 tests. |
+| 10 | **Device install + cert verify** | `install -r` Success, data preserved, cert `e486ea51…8968` = known-good keystore. |
+| 11 | **On-demand download proven on device** | Both weights in `files/app_ocr_models/pp_ocr_v5/v1/`; **on-device SHA-256 equals the pinned manifest exactly**. |
+| 12 | **Telemetry ContentProvider removed** | `ai.onnxruntime.TelemetryInitializer` runs before `Application.onCreate`, so the runtime toggle was too late. `tools:node="remove"`; **0 references in all 5 merged manifests and in the shipped APK**, 0 in the installed package. |
+| 13 | **Crash #1 diagnosed + fixed** | `NodeInfo → TensorInfo` silent-null cast (Kotlin platform type). Fixed via `NodeInfo.getInfo()`; new pure `OcrTensorReader` for the real 4-D/3-D output nesting (9 tests); dict 436 → **438 classes incl. the PaddleOCR space token**; init failure made **sticky** (was 23 re-inits / 649 graph-optimization runs). 511 tests. |
+| 14 | **Robustness: local failure ⇒ cloud** | `HybridOcrEngine` escalates on any non-cancellation throwable; `scanLocalOrFallback` mirrors `scanOwOcrOrFallback`. A bad tensor shape can no longer crash speech acquisition. |
+| 15 | **Latency metrics extracted** | Real pages: det p50 788 ms / p90 1926 / p99 4009; rec p50 243 / p90 380 / p99 569. |
+| 16 | **Crash #2 diagnosed + fixed** | `OcrTensorSize` — `recognitionInputSize` returned `Pair(height,width)` while `detectionInputSize` returned `Pair(width,height)`; every rec tensor was transposed (`index: 2 Got: 192 Expected: 48`) and square crops masked it. Named type now. 512 tests. |
+| 17 | **Hardware benchmark run** | `PpOcrV5EngineBenchmarkTest` made self-contained (draws its own pages; the old fixture-file version silently *skipped*). Two runs: det p50 80–110 ms **p90 548–552 (FAILS 250 ms)**, rec p50 47–48 / p90 57–59. |
+| 18 | **Adaptive Hybrid escalation verified** | 68 real pages: **7 accepted (10.3%), 61 escalated (89.7%), 0 local failures**, 1094 rec calls all height 48. |
+| 19 | **Escalation cause identified** | 100% of escalations are `meanCharConfidence < 0.80` (median 0.557); all other thresholds ~never hit. The 0.80 floor is the audit's *unmeasured* guess — deliberately NOT lowered. |
+| 20 | **Final decision recorded** | **GLENS stays the default engine**; PPOCR + ADAPTIVE stay opt-in. Two pre-registered audit criteria fail: escalation 89.7% vs R1's ~20%, and detection p50 393–788 ms vs §5's 400 ms kill-switch. |
+| 21 | **Final gates** | `spotlessCheck testDebugUnitTest` = **BUILD SUCCESSFUL, 512 tests, 0 failures**. `OcrPreferences.ocrModel()` still `GLENS` (verified, not assumed). |
+| 22 | **Docs synced** | `state.md`, `memory.md` (3 durable rules), `history/session-logs.md` (5 session records). |
+
+**Not done, deliberately:** merging local+cloud boxes (breaks `OcrRegion.order`); deleting
+`FastOcrEngine`/`FastVocab` (~21 MB of dead weight) until PP-OCRv5 is device-verified — and
+`UnavailableDetOcrEngine` is *load-bearing*, not an obsolete stub, since its throw is what routes
+FAST → GLENS; lowering the confidence floor without a local-vs-GLENS accuracy comparison.
+**Open:** the true post-fix escalation *quality* profile needs a local-vs-GLENS text comparison, which
+does not exist yet.
+
 ## Current blockers
 
 1. **Debug-keystore signature mismatch** blocks device pass: `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (09-15). RECONCILED 2026-09-26: debug signing uses container `/home/vscode/.android/debug.keystore`; a gate build WITHOUT the `yomihon-android-home` volume mounted signs with a stale key (`1a6fbe75...`), while installed/known-good = `e486ea51...8968` (volume keystore, alias `androiddebugkey`, created 2026-08-22). ALWAYS mount `yomihon-android-home:/home/vscode/.android` for debug builds; verify cert before `install -r`; never uninstall `app.yomihon.dev` without a current `.tachibk` backup (data loss). 09-20 v0.5.4.2 release used the stable keystore (verified) — release path unaffected.
@@ -164,6 +542,10 @@ Last session:   2026-09-26 OcrExclusionMatcher O(n^3) -> linear (12.3s stall eli
 
 ```text
 HARD HALTED:   Q3, Q4, Q5, Q6, Q7 (user, 2026-09-13) — do not inspect/implement.
+LIFTED 09-26:  local OCR engine reinstatement — lifted by the user's PP-OCRv5 master task
+               (audit §8 asked for exactly this authorization); PP-OCRv5 supplies the text
+               DETECTOR the 09-26 S4 verdict identified as the hard blocker. Not a re-open of
+               the S4 stack: ocr_fast/FastVocab still exist and are still dead weight.
 REJECTED:      true backdrop blur (RenderEffect), nav-tab customization as 6th tab/IA
                change, standardized reselect, Browse Search tab, Library page-level
                Continue, screen-OCR from other apps, local OCR engine reinstatement,
