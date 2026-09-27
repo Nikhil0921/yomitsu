@@ -749,7 +749,24 @@ class OcrRepositoryImpl(
                         },
                     )
                 }
-            }.also { cacheStore.upsert(it) }
+            }.also {
+                // scanWithGlensOnce already times its cache write; scanAdaptive did not, which made
+                // a fully-cached chapter look like it had been scanned from scratch. It cost a wrong
+                // intermediate conclusion when reading the 09-27 device capture.
+                val cacheStartedAt = if (tachiyomi.data.BuildConfig.DEBUG) System.nanoTime() else 0L
+                try {
+                    cacheStore.upsert(it)
+                } finally {
+                    if (tachiyomi.data.BuildConfig.DEBUG) {
+                        val endedAt = System.nanoTime()
+                        logcat(LogPriority.DEBUG) {
+                            "OCR cache write chapter=$chapterId page=$pageIndex " +
+                                "startNs=$cacheStartedAt endNs=$endedAt " +
+                                "elapsedMs=${(endedAt - cacheStartedAt) / 1_000_000}"
+                        }
+                    }
+                }
+            }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             if (isConnectivityFailure(error)) throw OcrException.ConnectionError(error)

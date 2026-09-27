@@ -6,10 +6,12 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -329,6 +331,38 @@ class OcrScanManagerTest {
         )
 
         coVerify(exactly = 0) { OcrScanJob.start(any()) }
+    }
+
+    /**
+     * A chapter whose scan is interrupted goes back to QUEUED, so the entry is retried rather than
+     * left stranded in SCANNING with no worker. This is what happened on device when WorkManager
+     * stopped the worker mid-chapter, and it was un-attributable afterwards because the whole
+     * cancellation path - this, and `restoreScanningChapter` - used to log nothing.
+     */
+    @Test
+    fun anInterruptedChapterScanGoesBackToQueued() = runTest {
+        val fixture = createFixture(
+            initialState = OcrScanStoreSnapshot(
+                entries = listOf(entry(7L, OcrScanQueueEntry.State.QUEUED)),
+                isPaused = false,
+            ),
+        )
+        coEvery { fixture.scanner.scanChapter(any(), any(), any(), any(), any()) } throws
+            CancellationException("worker stopped")
+
+        var caught: CancellationException? = null
+        try {
+            fixture.manager.runPendingQueue()
+        } catch (e: CancellationException) {
+            caught = e
+        }
+
+        assertNotNull(caught, "the cancellation must propagate to the worker")
+        assertEquals(
+            listOf(entry(7L, OcrScanQueueEntry.State.QUEUED)),
+            fixture.manager.queueState.value.entries,
+        )
+        assertNull(fixture.manager.queueState.value.activeProgress)
     }
 
     private fun createFixture(

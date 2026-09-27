@@ -247,6 +247,9 @@ internal class OcrChapterScanner(
                 )
                 false
             } else {
+                logcat(LogPriority.DEBUG) {
+                    "OCR scan of chapter $chapterId finished, all $totalPages pages scanned"
+                }
                 onComplete(lastProgress)
                 true
             }

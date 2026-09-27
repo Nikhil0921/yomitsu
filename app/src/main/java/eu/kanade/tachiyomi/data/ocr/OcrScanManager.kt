@@ -292,6 +292,12 @@ class OcrScanManager internal constructor(
                     )
                 }
             } catch (e: CancellationException) {
+                // Previously silent. On device this was un-attributable: the chapter's cache rows
+                // split cleanly across a worker stop and the only trace was WorkManager's own
+                // `onStopJob` line, not ours.
+                logcat(LogPriority.WARN) {
+                    "OCR queue scan of chapterId=$chapterId interrupted; returning it to the queue"
+                }
                 restoreScanningChapter(chapterId)
                 throw e
             } catch (e: Throwable) {
@@ -406,6 +412,10 @@ class OcrScanManager internal constructor(
                 addAll(state.entries.filterNot { entry -> entry.chapterId == chapterId })
             }
 
+            logcat(LogPriority.WARN) {
+                "OCR queue chapterId=$chapterId -> ERROR after ${failedEntry.attempts + 1} attempt(s): " +
+                    (lastError ?: "no message")
+            }
             state.copy(
                 entries = nextEntries,
                 activeProgress = null,

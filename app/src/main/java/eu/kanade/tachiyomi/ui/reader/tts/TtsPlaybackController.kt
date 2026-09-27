@@ -685,9 +685,21 @@ internal class TtsPlaybackController(
             }
         }
         val acquireMs = SystemClock.elapsedRealtime() - acquireStartedAt
+        // shortRegions is the per-glyph signal: when the recognizer hands back one box per letter,
+        // TTS spells every word out and no amount of cleanup can join them, because
+        // SentenceSegmenter may not merge across regions. It was invisible in the log until the
+        // audit measured 270 of 1098 recognition calls as square 48x48 crops
+        // (docs/audits/full-ocr-pipeline-audit.md §4, R7).
+        val shortRegions = dedupedRegions.count { it.text.trim().length <= 1 }
         logcat(LogPriority.DEBUG) {
             "TTS page=$pageIndex segmented sentences=${sentences.size} regions=${result.regions.size} " +
-                "acquireMs=$acquireMs"
+                "shortRegions=$shortRegions acquireMs=$acquireMs"
+        }
+        if (shortRegions > 0 && sentences.isNotEmpty()) {
+            logcat(LogPriority.WARN) {
+                "TTS page=$pageIndex has $shortRegions/${dedupedRegions.size} single-glyph regions; " +
+                    "read-aloud will spell those words out"
+            }
         }
         if (sessionStartedAtElapsed != 0L) {
             logcat(LogPriority.INFO) {
