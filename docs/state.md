@@ -57,6 +57,152 @@ Last device:    2026-09-26 READ-ALOUD RESILIENCY VERIFICATION PASS (SM_M066B) �
                   S2 OcrScanJob ×3, S3 8× warm-skip 0ms vs 257ms, S5 759/760 HTTP200
                   cold-batch p50 546ms, S1 HIGH zero-wait ×2; 1× HTTP 500 no-retry = WATCH).
                   2026-09-19 STAGE 4L PASS (ch8447 p0–15, 160×HTTP200).
+Last device:    2026-09-27 STAGE 1 STEP 3 DEVICE-VERIFIED on SM_M066B
+                  (0.5.4.2-8311, cert e486ea51…8968, `install -r` Success, firstInstallTime
+                  2026-09-16 intact = no data loss). Capture
+                  /sdcard/Download/logcat-20260927-174019-stage1.log (63 MB), boundary marker
+                  `YOMI_STAGE1_CAPTURE_START` at line 253303 (23:10:22.686) — read only from
+                  there. **THE TEST WAS HARD: THE DEVICE HAD NO DNS.** 128x
+                  `UnknownHostException: Unable to resolve host
+                  "lensfrontend-pa.googleapis.com"`, 62x `SocketTimeoutException: timeout`,
+                  every GLENS tile failing all 3 attempts. So EVERY OCR in the run failed.
+                  **RESULT: 9 consecutive OCR failures inside ONE session, and the session walked
+                  pages 1→2→3→4→5→6→7→8→9 instead of dying on page 1.** `TTS OCR unavailable for
+                  page=N chapter=4561; treating the page as having no text` ×9, each followed by
+                  `TTS page advance request target=N+1` + `advance confirmed`. **0 × OcrError,
+                  0 × `OCR timeout page=` (the old line that lied about the code), 0 crashes.**
+                  The pre-fix build died 3× on the SAME page in 5 min with zero progress
+                  (logcat-20260927-run2.log ch4563 p1); this build lost the whole chapter's speech
+                  but kept the session alive and let the user keep going.
+                  NOT EXERCISED BY THIS RUN (honest gaps): **no `OcrChapterScanner` ran at all**
+                  (0 occurrences) because the network never came up, so **steps 1+2 (the cache
+                  wipe) and steps 4+5 (ERROR retry / startIfPending) are still UNVERIFIED on
+                  device** — code-verified and unit-tested only. Re-run with the network up.
+                  Also measured under total outage: OCR queue wait HIGH p50 62s / max 113s,
+                  NORMAL p50 348s — non-preemptive cap-3 with 100s+ doomed uploads, i.e. the queue
+                  behaving as designed, not a new stall. 3 pages did speak; cold start→first speech
+                  113ms cached / 9815ms cold.
+
+Last session:   2026-09-27 OCR PIPELINE STAGE 1 COMPLETE (steps 1-6, user-authorized,
+                  NO COMMIT). Steps 2-5 of the audit's 19-step plan REMAIN UNAUTHORIZED. GATES (docker vsc-yomihon-e24e3bd7, -Xmx4g, BOTH
+                  volumes): `spotlessCheck testDebugUnitTest` = **BUILD SUCCESSFUL 3m01s —
+                  523 tests, 0 failures** (all modules); `:app:assembleDebug
+                  verifySqlDelightMigration` = BUILD SUCCESSFUL 3m07s. No DB change. No commit.
+                  TEST-FIRST THROUGHOUT: every step's test was run red first, then green.
+                  (1) **R1 CACHE WIPES DELETED** — `OcrChapterScanner` no longer calls
+                  `clearCachedChapterOcr` at scan start (`:69`), on a mid-chapter network abort
+                  (`:105`), or in `handleUnexpectedFailure` (`:209`), and no longer emits the
+                  `onCacheStateChanged(chapterId, false)` lies that accompanied them. The chapter's
+                  accumulated OCR is now only ever added to. `handleUnexpectedFailure` lost its
+                  unused `onCacheStateChanged` param. **The ctor keeps `clearCachedChapterOcr`
+                  injected (@Suppress("unused")) ON PURPOSE** — dropping it made the 3 new
+                  `coVerify(exactly = 0)` guards vacuous (a green test that tests nothing; see
+                  memory RULE 3). +4 tests: scanDoesNotWipeTheOcrCache,
+                  failedPageDoesNotWipeAlreadyScannedPages,
+                  networkAbortMidScanDoesNotWipeAlreadyScannedPages,
+                  cacheEventIsNotResetToFalseAtScanStart.
+                  (2) **R2 SESSION NO LONGER DIES ON ONE BAD PAGE** — `acquireSentences` logged
+                  *"advancing gracefully"* and then called `fail(TtsError.OcrError)`, i.e. phase =
+                  Error and `runPlayback` returns. Now an unobtainable page returns `emptyList()`,
+                  so the existing `pageHasText = false` branch of `TtsAdvancePolicy` moves on;
+                  the last page still ends as `Finished` + `Failed(NoTextFound)`. `scanOnDemand`'s
+                  `if (reportFailure) fail(OcrError)` on OOM/Exception is gone and with it the
+                  now-meaningless `reportFailure` parameter and its 2 call sites. +2 tests:
+                  failedPageAdvancesInsteadOfFailingTheSession,
+                  failedLastPageFinishesAsNoTextFound.
+                  (3) **ERROR HAS A BOUNDED RETRY BUDGET** — new `OcrScanQueueEntry.attempts`
+                  (persisted via `PersistedOcrScanQueueEntry.attempts`, defaulted so older JSON
+                  still decodes — this is a SharedPreferences JSON blob, NOT a SQLDelight schema,
+                  so no `.sqm`/verifySqlDelightMigration applies, and none was needed).
+                  `OcrScanManager.requeueFailedEntries()` moves `ERROR` entries back to `QUEUED`
+                  while `attempts <= AUTOMATIC_RETRIES (3)`, and `OcrScanJob.doWork` returns
+                  `Result.retry()` when it re-queued anything. Retries happen BETWEEN worker runs
+                  (WorkManager backoff), never inside `runPendingQueue`'s loop, so one run still
+                  attempts each chapter exactly once. `resume()` resets `attempts = 0` — a manual
+                  retry is a fresh, unlimited budget. **SPEC CHANGE: the pre-existing test
+                  `runPendingQueueDoesNotAutoRetryFailures` asserted the old terminal-ERROR
+                  intent BY NAME and was rewritten** to
+                  `runPendingQueueScansEachChapterOnceAndNeverLoops` (it now pins "one attempt per
+                  run, no spin") plus `failedChapterIsAutomaticallyRetriedUpToTheBudget` and
+                  `manualResumeRestoresTheAutomaticRetryBudget`; the audit is the evidence that
+                  the old intent was wrong. Flagged to the user. 2 existing
+                  `entry(..., lastError=...)` expectations gained `attempts = 1`.
+                  (4) **`startIfPending()` NOW HAS CALLERS** — it had ZERO, which is why a
+                  restored `QUEUED` entry (SCANNING remapped on process death) or one enqueued
+                  while a worker was finishing (`enqueueUniqueWork(KEEP)` drops that request) sat
+                  with nothing to run it forever. Called from `OcrScanManager.init` (skipped when
+                  paused) and from `OcrScanJob.doWork` on the success path. +2 tests:
+                  aPersistedQueuedEntryStartsAWorkerOnConstruction,
+                  aPausedQueueStartsNoWorkerOnConstruction.
+                  (5) **STAGE 1 STEP 6 LANDED — user sign-off 2026-09-27 under rules §10.**
+                  `OcrChapterScanner` no longer returns `true` with `skippedPages > 0`: it now
+                  reports the holes and returns false, so `OcrScanManager` keeps the entry (as
+                  ERROR) instead of deleting a chapter that is not actually scanned. New
+                  `OcrScanFailure.PagesSkipped(skipped, total)` + base string
+                  `ocr_preprocess_pages_skipped` ("%1$d of %2$d pages scanned, the rest will be
+                  retried"); the notifier's `toMessage()` needed `when (val failure = this)` to
+                  bind it. The retry loop is unchanged on purpose — it still attempts EVERY page, so
+                  one bad page does not abandon the rest. Combined with the retry budget this is
+                  self-healing and cheap: a retry re-runs only the missing pages, because
+                  `OcrRepositoryImpl.scanPage` checks the cache first and R1 no longer wipes it.
+                  TWO EXISTING TESTS RE-SPECIFIED UNDER EXPLICIT §10 SIGN-OFF, renamed not
+                  deleted: `failedPageIsSkippedAndScanContinues` ->
+                  `failedPageIsSkippedButScanIsNotReportedComplete`,
+                  `timedOutPageIsSkippedAndScanContinues` ->
+                  `timedOutPageIsSkippedButScanIsNotReportedComplete`. Both now assert
+                  `ok == false` + `PagesSkipped`, and both still assert every page is attempted —
+                  the "scan continues" half of the original intent is preserved. +2 new tests:
+                  `partialScanReportsFailureInsteadOfClaimingSuccess`,
+                  `completeScanStillReportsSuccessAndNoError`. One stale test assertion of my own
+                  was corrected: `failedPageDoesNotWipeAlreadyScannedPages` used
+                  `onError = { throw AssertionError(...) }`, and now that a partial scan legitimately
+                  reports, throwing from `onError` was caught by the scanner's own catch-all and
+                  turned into a nested `Unexpected` — it collects the errors instead.
+                  **Stage 1 is COMPLETE (all 6 steps).** GATES: `spotlessCheck testDebugUnitTest
+                  :app:assembleDebug verifySqlDelightMigration` = **BUILD SUCCESSFUL 4m30s —
+                  525 tests, 0 failures** (was 523, +2). No commit.
+                  **STAGES 2-5 REMAIN UNAUTHORIZED.**
+                  **DEVICE: step 3 VERIFIED 2026-09-27 (see `Last device` above); steps 1/2/4/5
+                  still unverified on device** because that run had no network and no background
+                  chapter scan ever started.
+Last session:   2026-09-27 READ-ONLY FULL OCR PIPELINE AUDIT
+                   (docs/audits/full-ocr-pipeline-audit.md). No source changes, no gates, no commit.
+                   4 areas: queue/prefetch deadlocks, TTS letter spelling, duplicate words +
+                   exclusion matching, engine fallback/recovery. **ONE ROOT CAUSE BEHIND 3 OF THE 4
+                   SYMPTOMS: `OcrChapterScanner` wipes the chapter's whole OCR cache three times**
+                   (`:69` scan start, `:105` network abort, `:209` handleUnexpectedFailure), and
+                   `deleteChapterPages` is model-blind. So an ERROR chapter has ZERO cached pages and
+                   `resume()` re-wipes it. DEVICE PROOF ch4563 p1, three consecutive session deaths
+                   19:28:04 / 19:30:03 (24.9 s await → `OcrException$ConnectionError` → wipe) /
+                   19:32:51 (restart → `TTS OCR cache miss` → 29.3 s → dead). ch8936 p2 same at
+                   17:47/17:48/17:49. `ERROR` is terminal: `runPendingQueue`→`Result.success()`,
+                   `startIfPending()` (:45) has ZERO call sites, ERROR survives process death and is
+                   hidden from `remainingChapterCount`. **"c-h-a-n-g-e-s" = REGION COUNT, not spaces:**
+                   `mergeSpacedSingleLetters` is per-region and cannot merge a 1-char region; DB
+                   emits per-component boxes, `minSideFraction=0.003` lets a lone glyph through,
+                   width clamps to 48 and `normalize()` stretches it square — **270 of 1098 rec calls
+                   measured `in=48x48` (24.6%)**; `SentenceSegmenter` may not merge across regions, so
+                   7 glyphs = 7 `speak()` calls. `OcrQualityRouter.MIN_CHARS_PER_REGION` is a PAGE
+                   MEAN so a glyph-fragmented page passes. **Duplicate words = tile seams:** 13
+                   tiles/page at 20% overlap (tiled=true 20/20 pages), dedupe is IoU≥0.45 with NO
+                   text comparison (measured in=47→40, in=47→37, in=37→29 = partial). ALSO: the
+                   `acquireSentences` log says "advancing gracefully" then calls
+                   `fail(TtsError.OcrError)` (hard kill — log is wrong about the code);
+                   `openBitmap()`/`resolve()` unbounded while the 90 s guard DETACHES not cancels
+                   (`PrioritizedTaskQueue.kt:163`) → 16 pages × 90 s = 24 min; a partial scan
+                   returns `true` and is PINNED BY 2 EXISTING TESTS; `getCachedChapterIds` not
+                   model-filtered (model switch ⇒ every chapter looks cached ⇒ prefetch skipped);
+                   engine construction is an unlocked `?:` ⇒ duplicate ORT sessions that
+                   `closeEngines()` never frees; ADAPTIVE escalation bypasses the one-retry policy;
+                   `pref_ocr_model` has TWO defaults (`OcrPreferences.kt:15` GLENS vs
+                   `OcrRepositoryImpl.kt:41` LEGACY — 09-26 fixed the wrong one). CONFIRMED
+                   NOT-BUGS: no lock inversion anywhere, `HybridOcrEngine` holds no mutex across the
+                   cloud call, `OcrExclusionMatcher` still 7.6 ms median / 0.1% of acquireSentences,
+                   exclusion zones are user-authored only so headers/footers are not its job.
+                   11 root causes mapped, 19-step remediation plan in 5 stages, 7 test gaps listed.
+                   NOT ESTABLISHED: R8 frequency (JP locale reorder) needs a JP-mixed capture; the
+                   89.7% escalation rate may itself be a SYMPTOM of the glyph-box defect — a second
+                   reason not to lower the 0.80 floor yet.
 Last session:   2026-09-27 ADAPTIVE HYBRID ESCALATION VERIFIED — final numbers, 68 real pages.
                   GATES: `spotlessCheck testDebugUnitTest` = **BUILD SUCCESSFUL 3m16s — 512 tests,
                   0 failures**. No DB change. No commit. **GLENS remains the code default**

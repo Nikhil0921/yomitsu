@@ -51,6 +51,40 @@ There is exactly ONE.
 
 ```text
 CURRENT AUTHORIZED TASK:
+    OCR PIPELINE REMEDIATION — STAGE 1 of 5 (user authorization 2026-09-27,
+    "AUTHORIZED", after accepting docs/audits/full-ocr-pipeline-audit.md).
+    Root cause: OcrChapterScanner wipes the chapter's whole OCR cache three
+    times (scan start :69, network abort :105, handleUnexpectedFailure :209) and
+    deleteChapterPages is model-blind, so an ERROR chapter has ZERO cached pages
+    and resume() re-wipes it. DEVICE VERIFIED ch4563 p1: 3 session deaths in
+    5 min, each preceded by OcrException$ConnectionError and followed by
+    "TTS OCR cache miss".
+
+    STAGE 1 SCOPE — sequential, test-first, one step at a time:
+      1+2. Remove the three cache wipes in OcrChapterScanner. Test first.
+      3.    A failed on-demand page ADVANCES instead of fail(TtsError.OcrError)
+            (acquireSentences currently logs "advancing gracefully" and then
+            kills the session — the log is wrong about the code). Test first.
+      4.    Give OcrScanQueueEntry.State.ERROR a retry budget so a transient
+            GLENS/network failure is not terminal. Test first.
+      5.    Call OcrScanManager.startIfPending() (currently ZERO call sites) on
+            init and after a run, so restored QUEUED entries are not orphaned.
+            Test first.
+      6.    STOP — partial-scan-must-not-report-complete contradicts
+            OcrChapterScannerTest.failedPageIsSkippedAndScanContinues and
+            timedOutPageIsSkippedAndScanContinues (rules §10). Needs its own
+            explicit sign-off. NOT authorized by this task.
+
+    Stages 2-5 (bounded waits, tile-seam duplicates, single-glyph region
+    defect, engine hygiene) remain UNAUTHORIZED. Audit:
+    docs/audits/full-ocr-pipeline-audit.md §8.
+
+    CONSTRAINTS: no DB schema change (SharedPreferences JSON in
+    OcrScanStoreSerializer is not a schema, but state it); no navigation IA; no
+    reader architecture outside the audit's scope; max 2 parallel sub-agents;
+    DO NOT commit/tag/push (rules §9) — leave the tree uncommitted for review.
+
+    SUPERSEDED (done 2026-09-26, kept for history):
     UNCACHED COLD-START OCR FALSE-NEGATIVE FIXES A–D 2026-09-26 (user master
     prompt; diagnosed in docs/audits/uncached-cold-start-diagnostic.md):
     root cause = Fix-2's 8s withTimeoutOrNull cancelled a *succeeding* HIGH

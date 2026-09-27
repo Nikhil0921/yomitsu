@@ -8,6 +8,92 @@
 
 ## Recent sessions (most recent first)
 
+### 2026-09-27 — OCR pipeline Stage 1 implemented (user-authorized, no commit)
+
+Steps 1-5 of `docs/audits/full-ocr-pipeline-audit.md` §8 Stage 1. **GATES: `spotlessCheck
+testDebugUnitTest` = BUILD SUCCESSFUL 3m01s — 523 tests, 0 failures; `:app:assembleDebug
+verifySqlDelightMigration` = BUILD SUCCESSFUL 3m07s.** No DB change, no commit. Every step's test
+was run RED first.
+
+- **R1 fixed by deletion:** the three `clearCachedChapterOcr` calls in `OcrChapterScanner` are gone
+  (scan start, network abort, `handleUnexpectedFailure`) along with the `onCacheStateChanged(false)`
+  lies. A chapter scan now only ADDS to the cache.
+- **R2 session-kill fixed:** `acquireSentences` used to log *"advancing gracefully"* and then call
+  `fail(TtsError.OcrError)`. It now returns `emptyList()` and lets `TtsAdvancePolicy` advance.
+  `scanOnDemand`'s `reportFailure` parameter is deleted — it had no remaining meaning.
+- **R2 retry budget:** `OcrScanQueueEntry.attempts` + `OcrScanManager.requeueFailedEntries()` +
+  `OcrScanJob.doWork → Result.retry()`. `AUTOMATIC_RETRIES = 3`, between runs, never inside the run
+  loop. `resume()` resets it.
+- **`startIfPending()` un-orphaned:** `OcrScanManager.init` + `OcrScanJob.doWork`.
+
+**Three durable lessons:**
+
+1. **A guard whose dependency you deleted is a guard that lies.** The first version of the no-wipe
+   fix removed the `clearCachedChapterOcr` constructor parameter, which made all three
+   `coVerify(exactly = 0)` tests pass *vacuously* — the class could no longer reach the mock. The
+   parameter is now kept with `@Suppress("unused")` and a KDoc saying exactly why. This is
+   `memory.md` RULE 3 ("a benchmark that skips is worse than none: it reads green") in a new form:
+   **a test that cannot fail is worse than no test.**
+2. **`OcrScanStore` persistence is a SharedPreferences JSON blob, not a schema.** Adding
+   `PersistedOcrScanQueueEntry.attempts: Int = 0` needed no `.sqm` and no
+   `verifySqlDelightMigration`; the default keeps existing JSON decodable. The OCR cache DB and the
+   main DB are untouched. Do not confuse the two — rules §10 is about SQLDelight.
+3. **A test name can pin a design decision that turns out to be wrong.**
+   `runPendingQueueDoesNotAutoRetryFailures` asserted, by name, that failures are never retried.
+   The audit proved that intent wrong (device: the same page failed 3x, minutes apart) and the test
+   was rewritten to the new spec rather than deleted — renamed to
+   `runPendingQueueScansEachChapterOnceAndNeverLoops`, which still pins the real invariant (one
+   attempt per run, no spin) plus the new budget tests. **Rewriting a test to a new specification is
+   not the same as weakening one to go green; say so out loud when you do it.**
+
+**Still open, deliberately:** audit Stage 1 step 6 (partial scan must not report complete) — it
+contradicts `OcrChapterScannerTest.failedPageIsSkippedAndScanContinues` and
+`timedOutPageIsSkippedAndScanContinues`, so it needs its own sign-off. And Stages 2-5 of the plan
+are unauthorized. Device re-verification on SM_M066B is pending.
+
+
+### 2026-09-27 — READ-ONLY full OCR pipeline audit (no source changes)
+
+Report: `docs/audits/full-ocr-pipeline-audit.md`. No gates run (docs-only). Evidence mined from four
+`.device-pass` captures (302/306/30/19 MB).
+
+**THE ONE THING TO CARRY FORWARD: a background OCR chapter scan destroys its own cache, and so does
+its own failure path.** `OcrChapterScanner` calls `clearCachedChapterOcr` three times — scan start
+`:69`, mid-chapter network abort `:105`, `handleUnexpectedFailure` `:209` — and
+`deleteChapterPages` has no `ocr_model` filter. So an `ERROR` chapter has **zero** cached pages,
+`resume()` re-wipes it, and Read-Aloud pays a cold network OCR round trip per page, forever.
+Device-verified: ch4563 p1 killed the session 3× in 5 minutes, each time preceded by
+`OcrException$ConnectionError` from the chapter scanner and followed by `TTS OCR cache miss`.
+
+**Durable corrections to standing assumptions:**
+
+- **"c-h-a-n-g-e-s" is a region-count defect, not a spacing defect.** `mergeSpacedSingleLetters` runs
+  per region; a one-character region has no spaced run for it to match. The real chain is DB's
+  per-component boxes → `minSideFraction = 0.003` lets a lone glyph through → recognition width
+  clamps to 48 → `normalize()` stretches it to `48x48` (**270 of 1098 measured rec calls**) →
+  `SentenceSegmenter` is forbidden from merging across regions. **Measure the recognition input
+  width before blaming the CTC decoder or the sanitizer.** Also: `OcrQualityRouter`'s
+  `MIN_CHARS_PER_REGION` is a **page mean**, so it structurally cannot see a glyph-fragmented page.
+- **`ERROR` is a terminal queue state and it is invisible.** `runPendingQueue` returns
+  `processedAny`, `OcrScanJob.doWork` maps that to `Result.success()`, and
+  `remainingChapterCount` excludes ERROR — so the notification says "done".
+  `startIfPending()` exists at `OcrScanManager.kt:45` and has **zero call sites**; grep for
+  `startIfPending` before assuming the queue self-heals on restart.
+- **There is no lock inversion in the OCR stack.** `OcrEngineLocks.withAllLocks` takes
+  fast→glens→owocr→detection while a scan takes at most one; `HybridOcrEngine` holds no mutex across
+  the cloud call. Stalls are state-machine + unbounded-network, not deadlock. Stop re-litigating
+  this.
+- **A 90 s guard that detaches does not bound anything.** `PrioritizedTaskQueue` deliberately runs
+  each task to completion in `scope.launch` (`:163`) regardless of whether the submitter still
+  awaits, so `withTimeoutOrNull` around a scan abandons the work and leaves it holding a slot.
+- **`pref_ocr_model` has two different defaults.** `OcrPreferences.kt:15` = GLENS (the UI),
+  `OcrRepositoryImpl.kt:41` = LEGACY (the engine). The 2026-09-26 "default LEGACY → GLENS" fix
+  touched only the first. `getCachedChapterIds` also lacks the `ocr_model` filter that `getPage`
+  has, so after a model switch every chapter reports as cached and next-chapter prefetch is skipped.
+- `OcrExclusionMatcher` is still healthy (7.6 ms median, 0.1% of `acquireSentences`). Exclusion
+  zones are **user-authored only** — there are no built-in header/footer rules, so "the matcher
+  should have filtered the watermark" is not a matcher bug.
+
 ### 2026-09-27 — Adaptive Hybrid measured: 89.7% escalation, caused by one unvalidated constant
 
 Final verification of the PP-OCRv5 feature on SM_M066B. No commit. **GATES: `spotlessCheck
