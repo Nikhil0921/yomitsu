@@ -57,6 +57,42 @@ Last device:    2026-09-26 READ-ALOUD RESILIENCY VERIFICATION PASS (SM_M066B) �
                   S2 OcrScanJob ×3, S3 8× warm-skip 0ms vs 257ms, S5 759/760 HTTP200
                   cold-batch p50 546ms, S1 HIGH zero-wait ×2; 1× HTTP 500 no-retry = WATCH).
                   2026-09-19 STAGE 4L PASS (ch8447 p0–15, 160×HTTP200).
+Last session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
+                  "AUTHORIZED" + "PROCEED WITH STAGES 2 THROUGH 5"). 5 commits, tree clean:
+                  74b17a463 Stage 1 code, ec68eb613 Stage 1 docs, 134473c80 Stage 2,
+                  93b091b39 Stage 3, f041dfa68 Stage 4, e31953d4d Stage 5. **GATES after EVERY
+                  stage: `spotlessCheck testDebugUnitTest :app:assembleDebug
+                  verifySqlDelightMigration` all BUILD SUCCESSFUL. 546 tests, 0 failures** (was 512
+                  at the start of this work: +34). No DB schema change anywhere in Stages 1-5.
+                  STAGE 2 (bounded waits): `openBitmap()` and the page-list resolve now run under the
+                  per-page budget; the page loop moved into `scanPages()` because
+                  `WithOcrScanSession.await` is not inline and has no non-local return;
+                  `PrioritizedTaskQueue` parents each task to its submitter's job so cancelling the
+                  caller cancels the work (kills the 29% duplicate-scan source);
+                  `OcrPageSourceResolver`'s single-slot page-list memo is a 4-chapter LRU.
+                  STAGE 3 (speech): `dedupeTileSeamDuplicates` is text-aware, killing both the
+                  duplicate-word seams and the false deletions (`DUPLICATE_IOU_THRESHOLD` removed);
+                  `PpOcrDbPostprocess` groups same-line components BEFORE unclipping — unclipping
+                  first grows neighbouring glyphs until they overlap, so the "same line" gap is
+                  gone by then — with the flood-fill contract preserved in a new `components()`;
+                  `OcrQualityRouter` gained `singleCharRegionRatio` because `MIN_CHARS_PER_REGION`
+                  is a page MEAN and structurally cannot see a glyph-fragmented page.
+                  **STEP 14 DELIBERATELY NOT DONE** (GLENS hard-coded `ja`/`Asia/Tokyo`): the plan
+                  requires a device capture of Japanese-mixed English pages and neither available
+                  capture has one. STAGE 4 (engine hygiene): `getCachedChapterIds` is model-scoped
+                  like `getPage`; engine construction is behind a leaf `synchronized` lock; the
+                  adaptive escalation goes through `cloudPage` and inherits the one-retry policy;
+                  `pref_ocr_model` has one default (GLENS) in both places. **Stage 4 has NO unit
+                  tests — `OcrRepositoryImpl` and `OcrCacheStore` need a real Context and SQLite, so
+                  that stage is verified by compilation, the full suite and device checks, NOT by a
+                  red-green cycle.** STAGE 5 (observability): five log lines, including
+                  `shortRegions` in the segmented-speech line (the "c-h-a-n-g-e-s" signal that was
+                  invisible until 1098 recognition widths were mined out of a 302 MB logcat), a clean
+                  scan's page count, the ERROR transition, the interruption, and scanAdaptive's cache
+                  write. One Stage 5 test passed on its FIRST run — a guard, not a red-green cycle.
+                  **STILL PENDING: device re-verification of Stages 2-5.** Only Stage 1 step 3 is
+                  device-proven. Everything else is compile + unit-test evidence.
+                  Q8 is closed and out of scope; do not re-verify or report it.
 Last device:    2026-09-27 STAGE 1 STEP 3 DEVICE-VERIFIED on SM_M066B
                   (0.5.4.2-8311, cert e486ea51…8968, `install -r` Success, firstInstallTime
                   2026-09-16 intact = no data loss). Capture

@@ -70,10 +70,23 @@ CURRENT AUTHORIZED TASK:
       5.    Call OcrScanManager.startIfPending() (currently ZERO call sites) on
             init and after a run, so restored QUEUED entries are not orphaned.
             Test first.
-      6.    STOP — partial-scan-must-not-report-complete contradicts
-            OcrChapterScannerTest.failedPageIsSkippedAndScanContinues and
-            timedOutPageIsSkippedAndScanContinues (rules §10). Needs its own
-            explicit sign-off. NOT authorized by this task.
+      6.    Partial-scan-must-not-report-complete. LANDED 2026-09-27
+            under explicit §10 sign-off: OcrScanFailure.PagesSkipped, and
+            both affected tests renamed to
+            failedPageIsSkippedButScanIsNotReportedComplete /
+            timedOutPageIsSkippedButScanIsNotReportedComplete, keeping their
+            "scan continues" assertions verbatim.
+
+    STAGES 1-5 ALL COMPLETE AND COMMITTED 2026-09-27 (user "AUTHORIZED", then
+    "PROCEED WITH STAGES 2 THROUGH 5"). 74b17a463, ec68eb613, 134473c80,
+    93b091b39, f041dfa68, e31953d4d. 546 tests, 0 failures; every stage gated
+    with spotlessCheck + testDebugUnitTest + :app:assembleDebug +
+    verifySqlDelightMigration. No DB schema change in any stage.
+    STEP 14 (the hard-coded GLENS "ja"/"Asia/Tokyo" client locale) is the one
+    audit item NOT done: it needs a device capture of Japanese-mixed English
+    pages and neither capture has one.
+    DEVICE RE-VERIFICATION OF STAGES 2-5 IS PENDING — only Stage 1 step 3 is
+    proven on hardware. Q8 is closed; do not re-verify or report it.
 
     Stages 2-5 (bounded waits, tile-seam duplicates, single-glyph region
     defect, engine hygiene) remain UNAUTHORIZED. Audit:

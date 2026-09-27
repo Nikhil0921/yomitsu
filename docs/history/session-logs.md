@@ -8270,3 +8270,85 @@ pipeline reports as a domain error, not as a test failure** — it hid a real as
 defect, engine hygiene) REMAIN UNAUTHORIZED.** Device verification is still partial: step 3 is
 proven on SM_M066B, steps 1/2/4/5/6 have code and unit-test evidence only, because the one device
 run had no network and no background chapter scan ever started.
+
+---
+
+## 2026-09-27 — OCR PIPELINE STAGES 1-5 IMPLEMENTED AND COMMITTED (no push)
+
+User authorization: "AUTHORIZED" (Stage 1), then "COMMIT STAGE 1 … PROCEED WITH STAGES 2 THROUGH 5".
+Six commits, tree clean, nothing pushed:
+
+```
+74b17a463 fix(ocr): survive page-scan failures in the queue and in read-aloud
+ec68eb613 docs: full OCR pipeline audit and Stage 1 records
+134473c80 fix(ocr): bound every network wait in the chapter scan, own queued work
+93b091b39 fix(ocr): stop seam duplicates and per-glyph regions corrupting speech
+f041dfa68 fix(ocr): engine hygiene — model-scoped cache probe, single-instance engines
+e31953d4d chore(ocr): log the transitions the OCR audit had to reconstruct by hand
+```
+
+**Gates run after EVERY stage, all green:** `spotlessCheck testDebugUnitTest :app:assembleDebug
+verifySqlDelightMigration`. **546 tests, 0 failures** (512 at the start: +34). No DB schema change
+in any stage. The Stage 4 `.sq` edit is query-only, so no `.sqm` migration and
+`verifySqlDelightMigration` was run for CI parity.
+
+**STAGE 2 — bounded waits (steps 7-9).** `openBitmap()` and the page-list resolve ran with no limit;
+both now sit under the existing per-page budget, and a stalled page becomes a skip rather than a
+chapter-wide stall. Getting the resolve guard in required moving the page loop into a private
+`scanPages()`: `WithOcrScanSession.await` is not an inline function, so there is no non-local return
+and no labelled `return@await`. That extraction was the single most expensive edit of the session —
+four failed patch attempts, then a full rewrite of the file from HEAD — because splicing a `use`
+lambda out of nested try/catch by line number does not survive brace imbalance. **Rewrite the file
+from HEAD when a surgical edit needs a third attempt; do not keep patching.**
+
+`PrioritizedTaskQueue` now parents each task to its submitter's job. It used to detach into the
+queue's own long-lived scope, which is why `withTimeoutOrNull` around a scan abandoned the upload
+instead of stopping it, and why `prefetchJob.cancel()` could not stop already-queued scans — the
+29% duplicate-scan enqueues the 09-26 audit measured. `OcrPageSourceResolver`'s single-slot
+page-list memo is now a 4-chapter `LinkedHashMap` in access order.
+
+**STAGE 3 — speech correctness (steps 10-13).** `dedupeTileSeamDuplicates` replaces the
+position-only `dedupeOverlapping`: identical normalised text in overlapping boxes is the rule the
+speech layer already used, so the cache stores what Read-Aloud will say. One rule fixed both
+directions of the old bug at once — partial seam copies now collapse, and a small bubble nested in a
+large one with different text survives. `DUPLICATE_IOU_THRESHOLD` is gone.
+
+For the per-glyph regions, the audit's preferred lever (`minSideFraction`) turned out to be wrong on
+inspection: a glyph is roughly 0.04 of page width, so raising the fraction high enough to drop glyphs
+would also drop real short words. The fix is line grouping — but it has to happen BEFORE unclipping.
+Unclipping each component first grows neighbouring glyphs until their boxes overlap, and by then the
+horizontal gap that said "same line" is gone. My first attempt merged the already-unclipped boxes and
+merged **everything** on a row, which failed a pre-existing test
+(`a white gap splits two blobs`). The fix was to split the flood fill out as `components()` so the
+merge runs on raw rects and the existing test keeps testing exactly what it always tested.
+`OcrQualityRouter` gained `singleCharRegionRatio` — `MIN_CHARS_PER_REGION` is a page MEAN, so it
+cannot see a page that is mostly one-glyph boxes no matter how high the threshold goes.
+
+**STAGE 4 — engine hygiene (steps 15-19).** `getCachedChapterIds` was the one OCR cache query
+without the model filter that `getPage` has, so switching the OCR model silently invalidated whole
+chapters while the badge still read "cached" — confirmed on device, where the cache held GLENS,
+ADAPTIVE and PPOCR rows side by side. Engine construction is now behind a leaf `synchronized` lock
+(a Mutex would be wrong: it never suspends and must not join a lock-ordering cycle with the engine
+mutexes). The adaptive escalation goes through `cloudPage`, inheriting the one-retry policy it was
+bypassing. `pref_ocr_model` finally has one default.
+
+**NO UNIT TESTS FOR STAGE 4, and that is not an oversight.** `OcrRepositoryImpl` needs a real
+`Context` and `OcrCacheStore` a real SQLite driver, so none of the four items can be red-green tested
+on the JVM. Writing tests that assert trivia would have been worse than none. Stage 4 is verified by
+compilation, the full suite, and device checks still to come.
+
+**STAGE 5 — observability (step 20, plus two gaps found during the 09-27 device read).** Five log
+lines, each of which would have prevented a wrong conclusion: `shortRegions` in the segmented-speech
+line (the "c-h-a-n-g-e-s" signal, previously invisible until 1098 recognition widths were mined out
+of a 302 MB logcat), a clean scan's page count, the ERROR transition, the interruption path, and
+`scanAdaptive`'s cache write. The interruption and the scanAdaptive write were the two gaps found
+while analysing logcat-20260927-run2.log: the former was un-attributable after the fact (only
+WorkManager's own `onStopJob` line showed it), the latter made a fully-cached chapter look freshly
+scanned. One test, `anInterruptedChapterScanGoesBackToQueued`, **passed on its first run** — the
+behaviour already existed and was simply unverified, so it is a guard and not a red-green cycle.
+
+**STEP 14 NOT DONE.** The hard-coded GLENS `ja` / `Asia/Tokyo` client locale needs a device capture of
+Japanese-mixed English pages to justify changing, and neither capture has one. Left alone on purpose.
+
+**OUTSTANDING:** device re-verification of Stages 2-5. Only Stage 1 step 3 is proven on hardware.
+Q8 is closed and out of scope.
