@@ -38,7 +38,11 @@ class OcrRepositoryImpl(
     private val context: Context,
 ) : OcrRepository {
     private val preferenceStore = AndroidPreferenceStore(context)
-    private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+
+    // Same key as OcrPreferences.ocrModel(), and the same GLENS default. They used to disagree -
+    // GLENS in the settings UI, LEGACY here - so a fresh install displayed one engine and dispatched
+    // on another until the user touched the dropdown (docs/audits/full-ocr-pipeline-audit.md R11).
+    private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.GLENS)
     private val useFallbackModelsPref = preferenceStore.getBoolean("pref_use_fallback_models", true)
 
     private val environmentResult by lazy {
@@ -143,7 +147,22 @@ class OcrRepositoryImpl(
         }
     }
 
-    private fun engineFor(type: EngineType): OcrEngine {
+    /**
+     * Guards the engine singletons. The fields below used to be a bare `?: assign`, and the queue
+     * runs up to three tasks concurrently, so several callers could each construct a
+     * [PpOcrV5Engine] — each of which creates two ONNX Runtime sessions on first use. `closeEngines`
+     * only ever closed the field's current instance, so the losers' native memory was never freed
+     * (docs/audits/full-ocr-pipeline-audit.md R10).
+     *
+     * `synchronized` and not a coroutine Mutex on purpose: this is a leaf lock, it never suspends,
+     * and it cannot participate in a lock-ordering cycle with the engine mutexes. The
+     * [data.tachiyomi.domain.BuildConfig.DEBUG] -only diagnostics inside are not worth a second path.
+     */
+    private val engineLock = Any()
+
+    private fun engineFor(type: EngineType): OcrEngine = synchronized(engineLock) { engineLocked(type) }
+
+    private fun engineLocked(type: EngineType): OcrEngine {
         return when (type) {
             EngineType.LEGACY -> glensEngine ?: GlensOcrEngine().also {
                 glensEngine = it
@@ -167,15 +186,26 @@ class OcrRepositoryImpl(
         }
     }
 
-    private fun ppOcrEngine(): PpOcrV5Engine {
-        return ppOcrEngine ?: PpOcrV5Engine(ppOcrModelDirectory, textPostprocessor).also {
+    private fun glensEngine(): GlensOcrEngine = synchronized(engineLock) {
+        glensEngine ?: GlensOcrEngine().also { glensEngine = it }
+    }
+
+    private fun ppOcrEngine(): PpOcrV5Engine = synchronized(engineLock) {
+        ppOcrEngine ?: PpOcrV5Engine(ppOcrModelDirectory, textPostprocessor).also {
             ppOcrEngine = it
         }
     }
 
-    private fun hybridEngine(): HybridOcrEngine {
-        return hybridEngine ?: HybridOcrEngine(ppOcrEngine()).also {
+    private fun hybridEngine(): HybridOcrEngine = synchronized(engineLock) {
+        hybridEngine ?: HybridOcrEngine(ppOcrEngineLocked()).also {
             hybridEngine = it
+        }
+    }
+
+    /** [ppOcrEngine] for callers already holding [engineLock]. */
+    private fun ppOcrEngineLocked(): PpOcrV5Engine {
+        return ppOcrEngine ?: PpOcrV5Engine(ppOcrModelDirectory, textPostprocessor).also {
+            ppOcrEngine = it
         }
     }
 
@@ -184,10 +214,11 @@ class OcrRepositoryImpl(
         // every local scan redirects to Glens via the existing fallback chain.
         val selected = ocrModelPref.get()
         if (selected == OcrModel.PPOCR || selected == OcrModel.ADAPTIVE) {
-            if (ppOcrEngine().isInstalled()) return ppOcrEngine()
+            val local = ppOcrEngine()
+            if (local.isInstalled()) return local
         }
-        return detEngine ?: UnavailableDetOcrEngine().also {
-            detEngine = it
+        return synchronized(engineLock) {
+            detEngine ?: UnavailableDetOcrEngine().also { detEngine = it }
         }
     }
 
@@ -363,6 +394,7 @@ class OcrRepositoryImpl(
     override suspend fun getCachedChapterIds(chapterIds: Collection<Long>): Set<Long> {
         return cacheStore.getCachedChapterIds(
             chapterIds = chapterIds,
+            ocrModel = ocrModelPref.get(),
         )
     }
 
@@ -527,6 +559,31 @@ class OcrRepositoryImpl(
         }
     }
 
+    /**
+     * The cloud result for one page, with the same one-retry policy as a direct GLENS scan.
+     * Used by the adaptive escalation, which is the only other path that needs cloud text.
+     */
+    private suspend fun cloudPage(bitmap: Bitmap): List<OcrRegion> {
+        return try {
+            engineLocks.withTextEngineLock(EngineType.GLENS) {
+                glensEngine().recognizePage(bitmap).regions
+            }
+        } catch (firstError: Throwable) {
+            if (firstError is CancellationException) throw firstError
+            if (!isTransientHttpFailure(firstError)) throw firstError
+            logcat(LogPriority.WARN, firstError) { "OCR (glens) transient escalation failure, retrying once" }
+            try {
+                engineLocks.withTextEngineLock(EngineType.GLENS) {
+                    glensEngine().recognizePage(bitmap).regions
+                }
+            } catch (retryError: Throwable) {
+                if (retryError is CancellationException) throw retryError
+                firstError.addSuppressed(retryError)
+                throw firstError
+            }
+        }
+    }
+
     private suspend fun scanWithOwOcr(
         chapterId: Long,
         pageIndex: Int,
@@ -661,13 +718,24 @@ class OcrRepositoryImpl(
                     val engine = hybridEngine()
                     val page = engine.recognizePage(bitmap) {
                         // Only reached on escalation, so an accepted page never touches the network.
-                        val cloud = engineFor(EngineType.GLENS) as GlensOcrEngine
-                        cloud.recognizePage(bitmap).regions
+                        //
+                        // The cloud call goes through [cloudPage], not straight to the engine, so an
+                        // escalated page inherits the same one-retry policy as a direct GLENS scan.
+                        // Calling `recognizePage` on a raw engine reference bypassed it, and the
+                        // non-tiled path has no per-tile retry either - so a single 5xx/429 killed an
+                        // escalated page outright. That is the 09-25 "HTTP 500 no-retry" watch item.
+                        cloudPage(bitmap)
                     }
 
                     OcrPageResult(
                         chapterId = chapterId,
                         pageIndex = pageIndex,
+                        // Cached under the model that actually produced the text. Caching cloud text
+                        // under ADAPTIVE is fine and is the documented choice (audit §3.5 option A:
+                        // no new column, so `deleteDatabaseIfSchemaOutdated` cannot wipe the cache),
+                        // but PPOCR's own fallback path used to write GLENS text under the PPOCR key,
+                        // which made the cache indistinguishable from a genuine local result and
+                        // stopped the local engine ever being retried for that chapter.
                         ocrModel = modelKey,
                         imageWidth = bitmap.width,
                         imageHeight = bitmap.height,

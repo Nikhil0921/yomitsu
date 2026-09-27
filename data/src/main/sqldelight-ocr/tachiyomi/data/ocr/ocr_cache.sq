@@ -45,10 +45,14 @@ AND page_index = :pageIndex
 AND ocr_model = :ocrModel
 LIMIT 1;
 
+-- Model-scoped like getPage. It used to be unscoped, so a chapter whose pages were cached under a
+-- DIFFERENT model reported as cached: getPage then missed every page, next-chapter prefetch was
+-- skipped, and the reader landed on a fully cold chapter (docs/audits/full-ocr-pipeline-audit.md R9).
 getCachedChapterIds:
 SELECT DISTINCT chapter_id
 FROM ocr_pages
-WHERE chapter_id IN ?;
+WHERE chapter_id IN ?
+AND ocr_model = :ocrModel;
 
 getRegionsForPage:
 SELECT _id, page_id, region_order, left_norm, top_norm, right_norm, bottom_norm, text, orientation

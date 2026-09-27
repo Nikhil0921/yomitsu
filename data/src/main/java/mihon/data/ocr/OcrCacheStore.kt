@@ -132,6 +132,7 @@ internal class OcrCacheStore(
 
     suspend fun getCachedChapterIds(
         chapterIds: Collection<Long>,
+        ocrModel: OcrModel,
     ): Set<Long> {
         if (chapterIds.isEmpty()) {
             return emptySet()
@@ -141,6 +142,7 @@ internal class OcrCacheStore(
             val db = getDatabase()
             db.ocr_cacheQueries.getCachedChapterIds(
                 chapter_id = chapterIds.toList(),
+                ocrModel = ocrModel.name,
             ).awaitAsList().toSet()
         }
     }
