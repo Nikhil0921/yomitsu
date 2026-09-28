@@ -21,24 +21,24 @@ object PpOcrDbPostprocess {
 
     /**
      * Horizontal gap between two boxes, as a multiple of the TALLER box's height, still treated as
-     * one line.
+     * one line. 0.8 is about the inter-word space of display type — 0.25-0.35 em against a 0.7 em
+     * glyph — which is where it started and where it belongs.
      *
-     * 1.5, up from 0.8. 0.8 is about the inter-word space of display type — 0.25-0.35 em against a
-     * 0.7 em glyph — so at 0.8 a gap that is still ordinary word spacing refused to join, leaving
-     * one region per word, and a region boundary is a pause in Android TTS.
+     * It was raised to 1.5 on 2026-09-28 on the theory that a wider bound would join more glyphs.
+     * It does not: the per-page region counts were byte-identical at 0.8 and at 1.5
+     * (10 4 2 0 6 6 0 5 9 5 4 7 6 2 6 11 2 7 4 6) and single-glyph regions only moved 16.1% -> 13.7%,
+     * because the gap was never what kept them alive. The real cause was wide line crops being
+     * squashed into the recognizer's 320x48 tensor, fixed in `PpOcrV5Engine.recognizeChunked`. A
+     * wider bound only widens the risk of swallowing a second speech bubble, so it went back.
      *
      * The taller box, not the shorter, because a descender ("g") or an ascender ("h") is a taller
      * box than its x-height neighbour ("a"). Sizing the bound from the shorter box let a
-     * descender/short pair reject a gap it should accept: measured on hardware 2026-09-28, 84 of
-     * 514 recognition calls were still a square `in=48x48` crop, and 8 of 19 spoken pages still
-     * carried single-glyph regions.
+     * descender/short pair reject a gap it should accept.
      *
-     * ponytail: the guard against swallowing a second speech bubble is the ratio itself. Measured on
-     * 2026-09-28, two side-by-side bubbles leave a gap of 3.3x the taller box's height, so 1.5 has
-     * about 2.2x of headroom. If real content ever reads two bubbles as one sentence, lower this
-     * before touching anything else; if letter-spaced words still come apart, raise it.
+     * ponytail: if real content ever reads two bubbles as one sentence, lower this. Measured
+     * 2026-09-28: two side-by-side bubbles leave a gap of 3.3x the taller box's height.
      */
-    const val SAME_LINE_MAX_GAP_RATIO = 1.5f
+    const val SAME_LINE_MAX_GAP_RATIO = 0.8f
 
     fun boxes(
         probability: FloatArray,

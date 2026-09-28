@@ -20,6 +20,8 @@ import mihon.domain.ocr.model.PpOcrRecognition
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
 import java.nio.FloatBuffer
+import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.measureNanoTime
 
@@ -143,6 +145,65 @@ internal class PpOcrV5Engine(
      */
     suspend fun recognizeRegion(image: Bitmap): PpOcrRecognition = mutex.withLock {
         ensureInitialized()
+        val maxAspect = PpOcrPreprocess.RECOGNITION_MAX_WIDTH.toFloat() /
+            PpOcrPreprocess.RECOGNITION_HEIGHT
+        val aspect = image.width.toFloat() / max(image.height, 1)
+        if (aspect <= maxAspect) {
+            recognizeWholeCrop(image)
+        } else {
+            recognizeChunked(image, aspect, maxAspect)
+        }
+    }
+
+    /**
+     * A crop wider than the recognizer's tensor is split into chunks and each is decoded on its
+     * own, because fitting the whole line into one tensor squashes it horizontally.
+     *
+     * Measured on hardware 2026-09-28: 76% of detected line boxes were wider than
+     * `RECOGNITION_MAX_WIDTH / RECOGNITION_HEIGHT` allows, at a median squeeze of 2.8x and up to
+     * 10.3x, and `normalize` was calling `createScaledBitmap(crop, 320, 48)`. The recognizer then
+     * returned blank or one character, which is what made TTS spell words out and skip phrases —
+     * `OcrRepositoryImpl` drops a blank region entirely and keeps a one-character one.
+     */
+    private fun recognizeChunked(
+        image: Bitmap,
+        aspect: Float,
+        maxAspect: Float,
+    ): PpOcrRecognition {
+        val chunks = ceil(aspect / maxAspect).toInt().coerceAtLeast(2)
+        val sliceWidth = ceil(image.width.toFloat() / chunks).toInt().coerceIn(1, image.width)
+        // Overlap so a character on a boundary is not cut in half. The decoded text of the overlap
+        // is discarded by joinOcrChunks, so the duplication costs compute, not correctness.
+        val step = (sliceWidth * (1f - CHUNK_OVERLAP_RATIO)).toInt().coerceAtLeast(1)
+        val texts = mutableListOf<String>()
+        var confidence = 0f
+        var counted = 0
+        var start = 0
+        while (start < image.width) {
+            val end = minOf(start + sliceWidth, image.width)
+            val piece = Bitmap.createBitmap(image, start, 0, end - start, image.height)
+            try {
+                val result = recognizeWholeCrop(piece)
+                texts += result.text
+                if (result.text.isNotBlank()) {
+                    confidence += result.confidence
+                    counted++
+                }
+            } finally {
+                if (!piece.isRecycled) piece.recycle()
+            }
+            if (end >= image.width) break
+            start += step
+        }
+        return PpOcrRecognition(
+            text = joinOcrChunks(texts),
+            // Mean of the chunks that actually decoded: a blank chunk has no confidence worth
+            // averaging in, and the adaptive router reads this to decide whether to escalate.
+            confidence = if (counted == 0) 0f else confidence / counted,
+        )
+    }
+
+    private fun recognizeWholeCrop(image: Bitmap): PpOcrRecognition {
         val size = PpOcrPreprocess.recognitionInputSize(image.width, image.height)
         // Named, never destructured: the recognizer pins height at 48, so a transposed tensor is an
         // ORT_INVALID_ARGUMENT ("index: 2 Got: 192 Expected: 48") and every wide bubble crop died.
@@ -186,7 +247,7 @@ internal class PpOcrV5Engine(
             "OCR(ppocr) Runtime: rec=${elapsed}ms in=${inputWidth}x$inputHeight " +
                 "steps=$timeSteps conf=${recognition.confidence}"
         }
-        PpOcrRecognition(textPostprocessor.postprocess(recognition.text), recognition.confidence)
+        return PpOcrRecognition(textPostprocessor.postprocess(recognition.text), recognition.confidence)
     }
 
     override fun close() {
@@ -339,3 +400,61 @@ internal class PpOcrV5Engine(
         val REC_STD = floatArrayOf(0.5f, 0.5f, 0.5f)
     }
 }
+
+/**
+ * Stitches the text of a wide crop that was recognized in horizontal chunks back into one string.
+ *
+ * The chunks overlap on purpose so a character sitting on a boundary is not cut in half and
+ * mis-decoded; the cost is that it is decoded twice, so the join drops the tail of what has been
+ * accumulated when it is also the head of the next chunk.
+ *
+ * Top level in this file, not a file of its own, because on this build a new top-level declaration
+ * in a new main file does not reach unit tests: the class lands in the compile and runtime jars and
+ * is still unresolved from `src/test`, reproduced on 2026-09-28 in both `:domain` and `:data` with
+ * clean builds and no configuration cache. Adding a declaration to an existing file works, which is
+ * why this is here and not in its own file.
+ */
+internal fun joinOcrChunks(chunks: List<String>): String {
+    val out = StringBuilder()
+    for (raw in chunks) {
+        val chunk = raw.trim()
+        if (chunk.isEmpty()) continue
+        if (out.isEmpty()) {
+            out.append(chunk)
+            continue
+        }
+        val overlap = sharedLength(out, chunk)
+        if (overlap == 0) out.append(' ')
+        out.append(chunk, overlap, chunk.length)
+    }
+    return out.toString()
+}
+
+/**
+ * Longest suffix of [accumulated] that is also a prefix of [chunk], capped so a chunk is never
+ * consumed entirely, and capped at 8 characters because a genuine repeat that long is far less
+ * likely than a boundary character.
+ */
+private fun sharedLength(accumulated: StringBuilder, chunk: String): Int {
+    val max = minOf(accumulated.length, chunk.length, MAX_OCR_CHUNK_OVERLAP_CHARS)
+    for (length in max downTo 1) {
+        var matches = true
+        for (i in 0 until length) {
+            if (accumulated[accumulated.length - length + i] != chunk[i]) {
+                matches = false
+                break
+            }
+        }
+        if (matches) return length
+    }
+    return 0
+}
+
+private const val MAX_OCR_CHUNK_OVERLAP_CHARS = 8
+
+/**
+ * Fraction of each chunk repeated in the next one, so a character on a boundary is not cut in
+ * half. 0.12 is roughly two glyph widths at the sizes these crops are seen at, which is enough for
+ * any single character to be whole in at least one chunk without wasting much compute on repeats.
+ */
+private const val CHUNK_OVERLAP_RATIO = 0.12f

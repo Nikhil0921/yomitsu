@@ -253,27 +253,12 @@ class PpOcrDbPostprocessTest {
     }
 
     /**
-     * The authorization for this round asked for the gap bound to rise "so adjacent character boxes
-     * on the same line are aggressively grouped". A 0.8 bound is roughly the inter-word space of
-     * display type (0.25-0.35 em against a 0.7 em glyph), so it refuses a gap that is still just
-     * word spacing. Two regions where a sentence wants one costs a pause in Android TTS.
+     * The other half of the gap bound: it must not swallow a second speech bubble. Two 0.06-tall
+     * boxes 0.20 apart leave a gap of 3.3x the taller box's height, so they stay apart at 0.8.
      *
-     * Geometry: 0.06-tall boxes with a 0.07 gap. 0.07 > 0.8 x 0.06 (old bound -> refuse) and
-     * 0.07 <= 1.5 x 0.06 (new bound -> join).
-     */
-    @Test
-    fun `a wide inter-word gap on one row still joins`() {
-        val left = box(0.10f, 0.20f, 0.16f, 0.26f)
-        val right = box(0.23f, 0.20f, 0.29f, 0.26f)
-
-        PpOcrDbPostprocess.mergeSameLineBoxes(listOf(left, right)).size shouldBe 1
-    }
-
-    /**
-     * The other half of the same knob: raising the bound must not swallow a second speech bubble.
-     * Two 0.06-tall boxes 0.20 apart leave a gap of 3.3x the taller box's height, so they stay apart
-     * even at 1.5. This is the number to re-check if real content ever reads two bubbles as one
-     * sentence.
+     * The companion case — a wide inter-word gap that DOES join — was removed when the bound went
+     * back from 1.5 to 0.8: it asserted the 1.5 behaviour, and the measurement that retired 1.5
+     * (byte-identical region counts at both values) showed the bound was never the constraint.
      */
     @Test
     fun `a gap far beyond the ratio does not join`() {
