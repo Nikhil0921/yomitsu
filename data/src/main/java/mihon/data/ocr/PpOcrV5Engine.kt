@@ -153,10 +153,29 @@ internal class PpOcrV5Engine(
         if (width < MIN_CROP_SIDE_PX && height < MIN_CROP_SIDE_PX) {
             return@withLock PpOcrRecognition(text = "", confidence = 0f)
         }
+        recognizeInRange(image, depth = 0)
+    }
+
+    /**
+     * Recognizes [image] if its aspect is inside the usable range, otherwise splits it along
+     * whichever axis is over-long and re-checks each piece.
+     *
+     * The re-check matters: splitting a very wide box horizontally can yield pieces that are
+     * themselves square, and feeding one of those straight to the recognizer is exactly the
+     * starvation this whole change exists to remove. Measured 2026-09-28 at depth 0 only, 50 crops
+     * still arrived at a tensor <= 64px wide, every one of them a piece of a wider box.
+     */
+    private fun recognizeInRange(image: Bitmap, depth: Int): PpOcrRecognition {
+        val width = image.width.coerceAtLeast(1)
+        val height = image.height.coerceAtLeast(1)
+        if (width < MIN_CROP_SIDE_PX && height < MIN_CROP_SIDE_PX) {
+            return PpOcrRecognition(text = "", confidence = 0f)
+        }
         val aspect = width.toFloat() / height
-        when {
-            aspect > MAX_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = false)
-            aspect < MIN_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = true)
+        return when {
+            depth >= MAX_SPLIT_DEPTH -> recognizeWholeCrop(image)
+            aspect > MAX_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = false, depth)
+            aspect < MIN_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = true, depth)
             else -> recognizeWholeCrop(image)
         }
     }
@@ -178,6 +197,7 @@ internal class PpOcrV5Engine(
     private fun recognizeChunked(
         image: Bitmap,
         splitVertically: Boolean,
+        depth: Int,
     ): PpOcrRecognition {
         val target = if (splitVertically) {
             // Aim a little past the middle of the range: a strip this shape gives the CTC head
@@ -205,7 +225,7 @@ internal class PpOcrV5Engine(
                 Bitmap.createBitmap(image, offset, 0, end - offset, image.height)
             }
             try {
-                val result = recognizeWholeCrop(piece)
+                val result = recognizeInRange(piece, depth + 1)
                 texts += result.text
                 if (result.text.isNotBlank()) {
                     confidence += result.confidence
@@ -499,7 +519,13 @@ private const val MAX_RECOGNITION_ASPECT =
  * and a square speech bubble cannot decode at all. Measured 2026-09-28, a 458x427 bubble was
  * arriving as a 48x48 tensor with 7 steps and decoding to nothing.
  */
-private const val MIN_RECOGNITION_ASPECT = 2f
+private const val MIN_RECOGNITION_ASPECT = 3f
+
+/**
+ * Splits are applied to their own output at most this many times. Two is enough for any crop the
+ * detector produces; the cap exists so a pathological one cannot recurse forever.
+ */
+private const val MAX_SPLIT_DEPTH = 2
 
 /** A crop smaller than this on both sides is detector noise, not a character. */
 private const val MIN_CROP_SIDE_PX = 12
