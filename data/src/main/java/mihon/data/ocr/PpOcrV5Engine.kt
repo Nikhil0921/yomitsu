@@ -245,7 +245,12 @@ internal class PpOcrV5Engine(
         )
         logcat(LogPriority.DEBUG) {
             "OCR(ppocr) Runtime: rec=${elapsed}ms in=${inputWidth}x$inputHeight " +
-                "steps=$timeSteps conf=${recognition.confidence}"
+                "steps=$timeSteps conf=${recognition.confidence} " +
+                // src is the crop this tensor came from. Added 2026-09-28: 34% of crops reach the
+                // recognizer at a tensor <= 64px wide, which is <= 8 CTC time steps and cannot
+                // physically decode a line, yet the boxes feeding them have a median pixel aspect
+                // of 30:1. The box and the crop disagree and nothing logged the crop.
+                "src=${image.width}x${image.height}"
         }
         return PpOcrRecognition(textPostprocessor.postprocess(recognition.text), recognition.confidence)
     }
