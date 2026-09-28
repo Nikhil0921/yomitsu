@@ -8352,3 +8352,49 @@ Japanese-mixed English pages to justify changing, and neither capture has one. L
 
 **OUTSTANDING:** device re-verification of Stages 2-5. Only Stage 1 step 3 is proven on hardware.
 Q8 is closed and out of scope.
+
+---
+
+## 2026-09-28 — Stages 2-5 partial device verification (0.5.4.2-8316)
+
+`install -r` Success, cert `e486ea51…8968` verified with `apksigner` first, all seven Stage 1-5
+markers confirmed present in the shipped dex before installing (`shortRegions` classes32,
+`dedupeTileSeamDuplicates`/`cloudPage` classes12, `singleCharRegionRatio`/`mergeSameLineBoxes`
+classes10, `PageListTimeout`/`requeueFailedEntries` classes21 — the memory note about checking the
+right dex, since `:domain` lands in classes10 and not classes.dex). Capture
+`/sdcard/Download/logcat-20260928-011944-s25.log`, boundary `YOMI_S25_CAPTURE_START` line 303929.
+OCR model ADAPTIVE, 19 pages read aloud, 0 crashes.
+
+**PROVEN: Stage 5's instrumentation, and it paid for itself immediately.** `shortRegions` turned the
+"c-h-a-n-g-e-s" defect from an inference into a measurement — 12 WARN lines fired and 8 of 19 spoken
+pages carry single-glyph regions (page 1 = 8/9, page 11 = 7/15, page 18 = 6/10, page 7 = 5/13).
+Before Stage 5 that number was invisible; finding it in the 09-27 audit required mining 1098
+recognition widths out of a 302 MB logcat.
+
+**PROVEN: Stage 2's LRU memo.** `OCR resolveRemote memo hit chapter=8956 … cached=2` appears 7 times
+alongside 38 hits for chapter 8957 — two chapters memoized simultaneously, which the previous
+single-slot memo structurally could not do.
+
+**MEASURED SHORTFALL, not a guess: Stage 3's line grouping is incomplete.** Square `in=48x48`
+recognition crops are 84/514 = **16.3%**, down from 24.6% but not eliminated. The merge is clearly
+firing (widths 56, 64, 72, 80, 88, 96, 120, 136, 176, 192, 320 all appear), so it joins some glyph
+groups and stops at others. The most likely cause is in the rule I wrote: both the gap bound and the
+vertical-overlap bound use `minOf(a.height, b.height)`, so a pair like "g" (descender, taller box)
+next to "h" (ascender, shorter box) gets its threshold cut to the shorter box and falls below the
+real inter-glyph gap. `maxOf` is the obvious correction and is deliberately NOT applied without
+sign-off, because it also makes the rule more permissive and two same-row speech bubbles could start
+merging. Also worth stating plainly: this measure can only improve the LOCAL engine — an escalated
+page is spoken from cloud text, where per-glyph boxes are not the failure mode.
+
+**MEASURED GAP IN STAGE 4: the retry policy does not cover the real failure mode.** `cloudPage` now
+inherits the one-retry policy, but `isTransientHttpFailure` only matches messages containing
+"HTTP 5" or "HTTP 429". The 15 network failures in this window were 13
+`SocketTimeoutException: timeout` and 2 `ConnectionError`, so **neither the new
+"transient escalation failure, retrying once" line nor the pre-existing "transient scan failure"
+line ever fired**. 45 GLENS tile responses completed and 0 pages produced a result: the five
+escalations were network-starved, which at 13 tiles per page, 4 concurrent, 12 s read timeout is
+entirely plausible. **Wiring the escalation into the retry policy was only half of step 17** — the
+policy itself does not classify a read timeout as worth retrying, which is the dominant failure here.
+
+**STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENS page completed in the
+window, so `in=N out=M` was never emitted), Stage 4's model-scoped cache probe and engine lock.

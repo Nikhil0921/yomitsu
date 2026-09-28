@@ -57,6 +57,37 @@ Last device:    2026-09-26 READ-ALOUD RESILIENCY VERIFICATION PASS (SM_M066B) �
                   S2 OcrScanJob ×3, S3 8× warm-skip 0ms vs 257ms, S5 759/760 HTTP200
                   cold-batch p50 546ms, S1 HIGH zero-wait ×2; 1× HTTP 500 no-retry = WATCH).
                   2026-09-19 STAGE 4L PASS (ch8447 p0–15, 160×HTTP200).
+Last device:    2026-09-28 STAGES 2-5 PARTIAL DEVICE VERIFICATION (0.5.4.2-8316, cert
+                  e486ea51…8968, `install -r` Success, firstInstallTime 2026-09-16 intact).
+                  Capture /sdcard/Download/logcat-20260928-011944-s25.log (75 MB), boundary
+                  `YOMI_S25_CAPTURE_START` at line 303929 (06:49:49). Device clock is now +5h30m
+                  from host. Read only from the marker. OCR model = ADAPTIVE, 19 pages read aloud,
+                  0 crashes.
+                  **PROVEN.** (1) Stage 5 instrumentation works, and immediately earned itself:
+                  `shortRegions` is now a per-page measurement, 12 WARN lines fired, and the R7
+                  defect is quantified for the first time — 8 of 19 spoken pages carry single-glyph
+                  regions (page 1 = 8/9, page 11 = 7/15, page 18 = 6/10). That is the "c-h-a-n-g-e-s"
+                  symptom measured instead of inferred. (2) **Stage 2's LRU memo is proven**:
+                  `OCR resolveRemote memo hit … cached=2` (7×) — two chapters memoized at once,
+                  which the single-slot memo could not do. (3) Stage 1's advance-not-die behaviour
+                  held: TTS walked pages 5→9 and paused cleanly.
+                  **SHORTFALL, measured, not guessed.** Stage 3's line grouping is INCOMPLETE:
+                  square `in=48x48` recognition crops are 84/514 = **16.3%**, down from 24.6% but not
+                  eliminated, and the per-page shortRegions above are the residue. The merge is
+                  firing (many 56-320px wide boxes) but stops at some glyph boundaries; the most
+                  likely cause is that both the gap and the overlap test use
+                  `minOf(a.height, b.height)`, so a descender/ascender pair shrinks the threshold
+                  below the real gap. One-token change, NOT made without sign-off. Note the measure
+                  can only improve the LOCAL engine — escalated pages are spoken from cloud text.
+                  **Stage 4's retry policy does not cover the real failure mode.** `cloudPage` now
+                  inherits the one-retry policy, but `isTransientHttpFailure` matches only messages
+                  containing "HTTP 5" or "HTTP 429", and the 15 network failures observed were 13
+                  `SocketTimeoutException: timeout` + 2 `ConnectionError` — so **neither retry line
+                  ever fired**. 45 GLENS tile responses completed and 0 pages produced a result: the
+                  escalations were network-starved (13 tiles/page at 4 concurrency, 12 s read
+                  timeout). Wiring the escalation into a policy is only half the fix.
+                  **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENS
+                  page completed), Stage 4's model-scoped probe and engine lock.
 Last session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
                   "AUTHORIZED" + "PROCEED WITH STAGES 2 THROUGH 5"). 5 commits, tree clean:
                   74b17a463 Stage 1 code, ec68eb613 Stage 1 docs, 134473c80 Stage 2,
