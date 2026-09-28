@@ -313,33 +313,26 @@ internal class GlensOcrEngine : OcrEngine {
     }
 
     /**
-     * Per-tile retry: a single transient 5xx/429/timeout on one tile must not silently
-     * corrupt the whole page. Retry up to [TILE_RETRY_MAX] times on [IOException]
-     * (covers socket timeouts and HTTP status errors thrown from [executeRequest]).
+     * One tile attempt, with the tile named on the way out.
+     *
+     * There is no per-tile retry any more, and that is deliberate. With `TILE_RETRY_MAX = 2` a page
+     * was 13 tiles x 3 attempts x (10 s connect + 12 s read) = 264 s of worst case against the
+     * caller's 90 s `PAGE_SCAN_TIMEOUT`, and even one read timeout per tile cost 4 waves x 3 x 12 s
+     * = 144 s, so the page was skipped and the user saw a stall followed by a missing page. The
+     * page-level retry in `OcrRepositoryImpl` now owns retrying — it classifies the same failures
+     * (`isTransientOcrFailure`) and gets the whole page a second chance, so a single bad tile among
+     * thirteen is still retried, once, by the layer that can also bound the total.
      */
     private fun executeRequestWithRetry(payload: ByteArray, scanId: Int?, tileTop: Int?): ByteArray {
-        var lastException: Exception? = null
-        for (attempt in 0..TILE_RETRY_MAX) {
-            try {
-                return executeRequest(payload, scanId, tileTop)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: IOException) {
-                lastException = e
-                if (tachiyomi.data.BuildConfig.DEBUG) {
-                    logcat(LogPriority.WARN) {
-                        "[GlensOcrEngine] Tile $tileTop retry ${attempt + 1}/$TILE_RETRY_MAX" +
-                            " due to ${e.message}"
-                    }
-                }
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                throw e
-            }
+        try {
+            return executeRequest(payload, scanId, tileTop)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            // Keep the cause: `isTransientOcrFailure` walks the chain, so a SocketTimeoutException
+            // hidden under this message is still classified as worth one page-level retry.
+            throw IOException("GLens tile $tileTop failed: ${e.message}", e)
         }
-        throw IOException(
-            "GLens tile $tileTop failed after ${TILE_RETRY_MAX + 1} attempts",
-            lastException,
-        )
     }
 
     override fun close() = Unit
@@ -1067,11 +1060,25 @@ internal class GlensOcrEngine : OcrEngine {
         private const val TILE_ASPECT_RATIO = 1.8f
         private const val MIN_TILE_HEIGHT = 1000
         private const val TILE_OVERLAP_RATIO = 0.2f
-        private const val TILE_CONCURRENCY = 4
+
+        /**
+         * 2, down from 4. A phone uplink cannot carry four ~960 px tile uploads at once, and the
+         * contention showed up as `SocketTimeoutException` on tiles that would have succeeded in
+         * sequence. The page budget still closes: 13 tiles / 2 is 7 waves, and 7 x 12 s read timeout
+         * is 84 s against `PAGE_SCAN_TIMEOUT` = 90 s, so a slow-but-alive connection finishes the
+         * page instead of being cut off. A dead connection is bounded by that same 90 s and becomes
+         * a skip, which is the behaviour we want.
+         */
+        private const val TILE_CONCURRENCY = 2
 
         private const val CONNECT_TIMEOUT_MS = 10_000
+
+        /**
+         * 12 s, unchanged, and it is load-bearing rather than arbitrary: with [TILE_CONCURRENCY] = 2
+         * and no per-tile retry, 7 waves x 12 s is 84 s, just inside the 90 s page budget. Raising
+         * this past ~12.8 s would let a single slow wave push the page over the budget and skip it.
+         */
         private const val READ_TIMEOUT_MS = 12_000
-        private const val TILE_RETRY_MAX = 2
 
         private const val WIRE_TYPE_MASK = 0x7
         private const val WIRE_TYPE_LENGTH_DELIMITED = 2

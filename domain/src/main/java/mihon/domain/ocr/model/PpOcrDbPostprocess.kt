@@ -21,8 +21,11 @@ object PpOcrDbPostprocess {
 
     /**
      * Horizontal gap between two boxes, as a multiple of the TALLER box's height, still treated as
-     * one line. Tracked display type leaves a gap of a fraction of the glyph height; two separate
-     * bubbles on one row leave several times that.
+     * one line.
+     *
+     * 1.5, up from 0.8. 0.8 is about the inter-word space of display type — 0.25-0.35 em against a
+     * 0.7 em glyph — so at 0.8 a gap that is still ordinary word spacing refused to join, leaving
+     * one region per word, and a region boundary is a pause in Android TTS.
      *
      * The taller box, not the shorter, because a descender ("g") or an ascender ("h") is a taller
      * box than its x-height neighbour ("a"). Sizing the bound from the shorter box let a
@@ -30,11 +33,12 @@ object PpOcrDbPostprocess {
      * 514 recognition calls were still a square `in=48x48` crop, and 8 of 19 spoken pages still
      * carried single-glyph regions.
      *
-     * ponytail: raise it if adjacent speech bubbles on one row merge on real content; lower it if
-     * letter-spaced words still come apart. Measured headroom — two side-by-side bubbles in the
-     * test suite leave a gap 8x the taller box's height.
+     * ponytail: the guard against swallowing a second speech bubble is the ratio itself. Measured on
+     * 2026-09-28, two side-by-side bubbles leave a gap of 3.3x the taller box's height, so 1.5 has
+     * about 2.2x of headroom. If real content ever reads two bubbles as one sentence, lower this
+     * before touching anything else; if letter-spaced words still come apart, raise it.
      */
-    const val SAME_LINE_MAX_GAP_RATIO = 0.8f
+    const val SAME_LINE_MAX_GAP_RATIO = 1.5f
 
     fun boxes(
         probability: FloatArray,
