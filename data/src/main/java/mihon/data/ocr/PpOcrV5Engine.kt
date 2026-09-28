@@ -108,6 +108,28 @@ internal class PpOcrV5Engine(
         logcat(LogPriority.DEBUG) {
             "OCR(ppocr) Runtime: det=${elapsed}ms in=${inputWidth}x$inputHeight boxes=${boxes.size}"
         }
+        // Box geometry, in page-normalised l/t/r/b. Added 2026-09-28 because the gap bound turned
+        // out not to be what keeps single-glyph regions alive: raising it from 0.8 to 1.5 left the
+        // per-page region counts byte-identical, so "which test rejected this box" could only be
+        // answered by looking at the boxes. Keep it DEBUG-only; it is verbose by design.
+        if (boxes.isNotEmpty()) {
+            logcat(LogPriority.DEBUG) {
+                "OCR(ppocr) boxes: n=${boxes.size} " +
+                    boxes.joinToString(" ") { box ->
+                        val w = box.right - box.left
+                        val h = box.bottom - box.top
+                        "%.3f/%.3f/%.3f/%.3f(w=%.3f,h=%.3f,a=%.3f)".format(
+                            box.left,
+                            box.top,
+                            box.right,
+                            box.bottom,
+                            w,
+                            h,
+                            w * h,
+                        )
+                    }
+            }
+        }
         boxes
     }
 
