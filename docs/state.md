@@ -123,6 +123,34 @@ Last device:    2026-09-28 STAGES 2-5 PARTIAL DEVICE VERIFICATION (0.5.4.2-8316,
                   run, so both retry lines stayed at 0. That is correct behaviour, not a regression;
                   the network was healthy (3/3, 45 ms). Device-unproven either way; the 11 unit cases
                   are the only evidence. Forcing it needs a mid-scan network drop.
+                  **ROOT CAUSE FOUND 2026-09-28** — 0.5.4.2-8323, capture
+                  logcat-20260928-035358-s37.log, boundary YOMI_S37 line 253217. 24 cache misses,
+                  39 pages, 301 boxes, per-box geometry now logged.
+                  **THE WHOLE "48x48 CROP" METRIC IS AN ARTIFACT.** `PpOcrPreprocess
+                  .recognitionInputSize` pins tensor height to 48 and clamps width to
+                  `RECOGNITION_MAX_WIDTH = 320` (align 8), so a `48x48` crop only means aspect <= 1.0
+                  — it does not mean a fragmented glyph. Measured: 40 of 301 crops were 48x48, but
+                  only **2 of 301 detected boxes** have aspect <= 1.0. Predicted crops from the
+                  logged geometry (142 at 960x48 under the wrong 960 assumption) do not match the
+                  device histogram at all; actual widths top out at exactly the 320 clamp.
+                  **DETECTION IS ALREADY FINE.** Box aspect median **18.7:1**, p90 44.9:1 — these are
+                  whole lines of text, the product `mergeSameLineBoxes` is supposed to produce. Only
+                  2 of 301 are single-glyph-shaped, and both are blocked by a *negative* vertical
+                  overlap (-0.274, vertically disjoint), not by the gap bound. Raising
+                  `SAME_LINE_MAX_GAP_RATIO` 0.8 -> 1.5 left per-page region counts byte-identical
+                  (10 4 2 0 6 6 0 5 9 5 4 7 6 2 6 11 2 7 4 6) and square crops unchanged at 13.9%.
+                  **THE REAL DEFECT: `normalize()` non-uniformly squashes wide line crops.**
+                  `Bitmap.createScaledBitmap(crop, 320, 48, true)` compresses 76% of all boxes
+                  horizontally — median squeeze **2.8x**, p90 6.7x, max 10.3x — destroying glyph
+                  aspect. PP-OCRv5 then decodes noise, and the two symptoms follow directly:
+                  `OcrRepositoryImpl:667` `if (text.isBlank()) null` **drops** the region, so the
+                  phrase is never spoken ("skipping some phrases"), and a 1-char decode **survives**
+                  as a region, which `shortRegions` counts and TTS says as a bare letter ("spelled as
+                  characters"). `shortRegions` counts `text.trim().length <= 1` — recognized TEXT
+                  length, not box size — which is why it never tracked the box geometry.
+                  **PROPOSED FIX (not yet authorized): split a crop into <= 6.67:1 chunks with
+                  horizontal overlap, recognize each, concatenate.** Raising `RECOGNITION_MAX_WIDTH`
+                  is not the fix — the clamp and the stride-8 time-axis alignment are deliberate.
                   **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENSLast session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
                   "AUTHORIZED" + "PROCEED WITH STAGES 2 THROUGH 5"). 5 commits, tree clean:
                   74b17a463 Stage 1 code, ec68eb613 Stage 1 docs, 134473c80 Stage 2,
