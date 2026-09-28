@@ -145,43 +145,65 @@ internal class PpOcrV5Engine(
      */
     suspend fun recognizeRegion(image: Bitmap): PpOcrRecognition = mutex.withLock {
         ensureInitialized()
-        val maxAspect = PpOcrPreprocess.RECOGNITION_MAX_WIDTH.toFloat() /
-            PpOcrPreprocess.RECOGNITION_HEIGHT
-        val aspect = image.width.toFloat() / max(image.height, 1)
-        if (aspect <= maxAspect) {
-            recognizeWholeCrop(image)
-        } else {
-            recognizeChunked(image, aspect, maxAspect)
+        val width = image.width.coerceAtLeast(1)
+        val height = image.height.coerceAtLeast(1)
+        // A crop with a few pixels on each side cannot hold a character; let it decode as blank so
+        // the region is dropped rather than spoken as a stray letter. Measured 2026-09-28: crops of
+        // 8x6 and 9x8 px were reaching the recognizer and producing conf=0.0 or a lone character.
+        if (width < MIN_CROP_SIDE_PX && height < MIN_CROP_SIDE_PX) {
+            return@withLock PpOcrRecognition(text = "", confidence = 0f)
+        }
+        val aspect = width.toFloat() / height
+        when {
+            aspect > MAX_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = false)
+            aspect < MIN_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = true)
+            else -> recognizeWholeCrop(image)
         }
     }
 
     /**
-     * A crop wider than the recognizer's tensor is split into chunks and each is decoded on its
-     * own, because fitting the whole line into one tensor squashes it horizontally.
+     * Splits a crop the recognizer cannot take whole, and joins the decoded text back together.
      *
-     * Measured on hardware 2026-09-28: 76% of detected line boxes were wider than
-     * `RECOGNITION_MAX_WIDTH / RECOGNITION_HEIGHT` allows, at a median squeeze of 2.8x and up to
-     * 10.3x, and `normalize` was calling `createScaledBitmap(crop, 320, 48)`. The recognizer then
-     * returned blank or one character, which is what made TTS spell words out and skip phrases —
-     * `OcrRepositoryImpl` drops a blank region entirely and keeps a one-character one.
+     * The recognizer's tensor is height-pinned to 48 and width-clamped to
+     * `RECOGNITION_MAX_WIDTH`, so the usable aspect range is narrow and crops fall out of it on BOTH
+     * ends. A line of text is too wide and gets squashed; a speech bubble is roughly square and gets
+     * crushed to 7 CTC steps. Both decode to noise. Splitting along whichever axis is over-long
+     * brings either one back into range.
+     *
+     * Measured on hardware 2026-09-28: 34% of recognition calls arrived at a tensor <= 64px wide,
+     * and of those 96 decoded blank (the region is dropped, so the phrase is never spoken) and 98
+     * decoded a single character (the region survives, so a bare letter is spoken). Those two
+     * numbers are the whole reported symptom pair.
      */
     private fun recognizeChunked(
         image: Bitmap,
-        aspect: Float,
-        maxAspect: Float,
+        splitVertically: Boolean,
     ): PpOcrRecognition {
-        val chunks = ceil(aspect / maxAspect).toInt().coerceAtLeast(2)
-        val sliceWidth = ceil(image.width.toFloat() / chunks).toInt().coerceIn(1, image.width)
-        // Overlap so a character on a boundary is not cut in half. The decoded text of the overlap
-        // is discarded by joinOcrChunks, so the duplication costs compute, not correctness.
-        val step = (sliceWidth * (1f - CHUNK_OVERLAP_RATIO)).toInt().coerceAtLeast(1)
+        val target = if (splitVertically) {
+            // Aim a little past the middle of the range: a strip this shape gives the CTC head
+            // room to breathe without pushing the tensor back to its width clamp.
+            (MAX_RECOGNITION_ASPECT + MIN_RECOGNITION_ASPECT) / 2f
+        } else {
+            MAX_RECOGNITION_ASPECT
+        }
+        val along = if (splitVertically) image.height else image.width
+        val across = if (splitVertically) image.width else image.height
+        val count = ceil(along / (across * target)).toInt().coerceAtLeast(2)
+        val slice = ceil(along.toFloat() / count).toInt().coerceIn(1, along)
+        // Overlap so a character on a boundary is not cut in half. The duplicated text is dropped
+        // by joinOcrChunks, so the repetition costs compute, not correctness.
+        val step = (slice * (1f - CHUNK_OVERLAP_RATIO)).toInt().coerceAtLeast(1)
         val texts = mutableListOf<String>()
         var confidence = 0f
         var counted = 0
-        var start = 0
-        while (start < image.width) {
-            val end = minOf(start + sliceWidth, image.width)
-            val piece = Bitmap.createBitmap(image, start, 0, end - start, image.height)
+        var offset = 0
+        while (offset < along) {
+            val end = minOf(offset + slice, along)
+            val piece = if (splitVertically) {
+                Bitmap.createBitmap(image, 0, offset, image.width, end - offset)
+            } else {
+                Bitmap.createBitmap(image, offset, 0, end - offset, image.height)
+            }
             try {
                 val result = recognizeWholeCrop(piece)
                 texts += result.text
@@ -192,8 +214,8 @@ internal class PpOcrV5Engine(
             } finally {
                 if (!piece.isRecycled) piece.recycle()
             }
-            if (end >= image.width) break
-            start += step
+            if (end >= along) break
+            offset += step
         }
         return PpOcrRecognition(
             text = joinOcrChunks(texts),
@@ -463,3 +485,21 @@ private const val MAX_OCR_CHUNK_OVERLAP_CHARS = 8
  * any single character to be whole in at least one chunk without wasting much compute on repeats.
  */
 private const val CHUNK_OVERLAP_RATIO = 0.12f
+
+/**
+ * Widest crop the recognizer can take unsqueezed: `RECOGNITION_MAX_WIDTH / RECOGNITION_HEIGHT`.
+ * Anything above this was being compressed horizontally.
+ */
+private const val MAX_RECOGNITION_ASPECT =
+    PpOcrPreprocess.RECOGNITION_MAX_WIDTH.toFloat() / PpOcrPreprocess.RECOGNITION_HEIGHT
+
+/**
+ * Narrowest crop worth handing over whole. Below this the tensor width stops being 48 and the CTC
+ * head is left with too few time steps: the head downsamples time by 8, so a 48px tensor is 6 steps
+ * and a square speech bubble cannot decode at all. Measured 2026-09-28, a 458x427 bubble was
+ * arriving as a 48x48 tensor with 7 steps and decoding to nothing.
+ */
+private const val MIN_RECOGNITION_ASPECT = 2f
+
+/** A crop smaller than this on both sides is detector noise, not a character. */
+private const val MIN_CROP_SIDE_PX = 12
