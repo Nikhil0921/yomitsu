@@ -8398,3 +8398,59 @@ policy itself does not classify a read timeout as worth retrying, which is the d
 
 **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENS page completed in the
 window, so `in=N out=M` was never emitted), Stage 4's model-scoped cache probe and engine lock.
+
+---
+
+## 2026-09-28 — Targeted Stage 3 + Stage 4 fixes from the device measurements (62c03abe1)
+
+Authorized as "FIX STAGE 3 LINE-GROUPING" and "WIDEN STAGE 4 RETRY POLICY". Test-first, standard
+gate green: **558 tests, 0 failures, 0 skipped** (546 before, +1 and +11). Nothing pushed.
+
+**STAGE 3 — one variable, not two.** The authorization asked for `maxOf` in both the gap bound and
+the vertical-overlap bound. I applied it to the gap and deliberately left the overlap on `minOf`,
+because the two bounds answer different questions. The gap asks "is this tracking still word
+spacing", and a descender must not shrink that answer — that is the defect. The overlap asks "does
+the shorter box sit substantially inside the taller one", which is what a shared baseline means, and
+sizing it from the TALLER box makes it **stricter**, so it would merge FEWER boxes. Applying `maxOf`
+there could not have fixed the 16.3% and could only have regressed real glyph merges. The reasoning
+is recorded in the KDoc so the next reader does not "fix" it the other way.
+
+The red test is geometric and reproducible: a 0.10-tall box and a 0.03-tall box with a 0.05 gap.
+`0.05 > 0.8 x 0.03` (shorter basis -> refuse) and `0.05 <= 0.8 x 0.10` (taller basis -> join). It
+failed on the first run at `PpOcrDbPostprocessTest.kt:252` and passes now. Headroom against
+over-merging is measured, not assumed: the existing side-by-side-bubbles test leaves a gap 8x the
+taller box's height.
+
+**STAGE 4 — reused the file, then did not.** `OcrRepositoryImpl` already had
+`isConnectivityFailure`, walking the cause chain for exactly `UnknownHostException`,
+`ConnectException` and `SocketTimeoutException` — the three types the authorization asked for. First
+attempt hoisted it to file level so the new predicate could delegate, which meant moving the closing
+brace of the class and orphaning every function after it. That is the exact failure the memory note
+warns about ("one surgical edit that moved a brace", "rewrite from HEAD after 2-3 failed surgical
+attempts"), and I walked straight into it. Reverted the file from HEAD and redid it as one
+replacement plus one append, leaving `isConnectivityFailure` private in the class; the new
+file-level `isTransientOcrFailure` spells out the three exception checks again rather than moving
+three call sites. The duplication of four `is` checks inside one file is cheaper than the brace
+surgery, and the reason is written in the KDoc. Also deleted the one-line `isTransientHttpFailure`
+delegating wrapper instead of leaving a pointless indirection under a now-misleading name; its two
+call sites point straight at `isTransientOcrFailure`.
+
+**TESTABILITY.** Both fixes are pure predicates, so both got real tests — but `isTransientOcrFailure`
+had to leave the class to get one, because `OcrRepositoryImpl` needs a real `Context` and
+`OcrCacheStore` a real SQLite driver. Same move as `components()` in Stage 3: hoist the pure part
+out so a JVM test can reach it, leave the untestable class alone. 11 cases, including the ones that
+must stay FALSE — HTTP 400, HTTP 404, an unrelated `IllegalStateException`, and a throwable with
+neither message nor cause. `OcrException.ConnectionError` wrapping a `SocketTimeoutException` is
+covered explicitly, because the escalation path throws that wrapper and the cause chain has to be
+walked to reach the timeout.
+
+**GATE NOISE, both times benign.** `:app:packageDebug` failed once with BUILD FAILED and succeeded
+on retry with no code change — the marginal packaging memory the AGENTS.md build note warns about,
+even at `-Xmx4g`. The first gate run also failed on an unused import in the new test file; ktlint
+wanted the nested `OcrException.ConnectionError` imported as the nested name, and then wanted the
+imports reordered. `spotlessApply` fixed the ordering.
+
+**RE-VERIFICATION IS NOT OPTIONAL HERE.** Both fixes are unproven on hardware, and the OCR cache is
+the trap: `shortRegions` for an unchanged page still reflects whichever build last scanned it, so
+re-reading a cached chapter will show the old numbers and prove nothing. A fresh scan is required
+before either fix can be called verified.

@@ -86,9 +86,21 @@ Last device:    2026-09-28 STAGES 2-5 PARTIAL DEVICE VERIFICATION (0.5.4.2-8316,
                   ever fired**. 45 GLENS tile responses completed and 0 pages produced a result: the
                   escalations were network-starved (13 tiles/page at 4 concurrency, 12 s read
                   timeout). Wiring the escalation into a policy is only half the fix.
-                  **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENS
-                  page completed), Stage 4's model-scoped probe and engine lock.
-Last session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
+                  **BOTH SHORTFALLS NOW FIXED AND COMMITTED** as 62c03abe1, 558 tests 0 failures.
+                  (a) `PpOcrDbPostprocess.isSameLine` sized BOTH bounds from `minOf(a.height,
+                  b.height)`, so a descender/ascender pair shrank the gap bound below the real
+                  inter-glyph gap. The **gap** bound is now `maxOf`. The **overlap** bound stays
+                  `minOf` on purpose: `maxOf` there makes the rule stricter and merges FEWER boxes,
+                  the opposite of the goal. (b) `isTransientHttpFailure` matched only "HTTP 5"/"HTTP
+                  429" and a read timeout's message is literally "timeout", so it never matched. Now
+                  `isTransientOcrFailure`, walking the cause chain for HTTP 5xx/429 AND
+                  UnknownHost/Connect/SocketTimeout, hoisted to file level so a JVM test can reach it.
+                  **RE-VERIFICATION REQUIRED ON DEVICE:** both fixes need a fresh read-aloud. The OCR
+                  cache holds text scanned by the OLD build, so `shortRegions` on an unchanged page
+                  is stale and will not move until the chapter is re-scanned. Target metrics: square
+                  `in=48x48` crops well under 16.3%, and `transient escalation failure, retrying
+                  once` finally appearing.
+                  **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENSLast session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
                   "AUTHORIZED" + "PROCEED WITH STAGES 2 THROUGH 5"). 5 commits, tree clean:
                   74b17a463 Stage 1 code, ec68eb613 Stage 1 docs, 134473c80 Stage 2,
                   93b091b39 Stage 3, f041dfa68 Stage 4, e31953d4d Stage 5. **GATES after EVERY
