@@ -173,42 +173,46 @@ internal class PpOcrV5Engine(
         }
         val aspect = width.toFloat() / height
         return when {
+            // Split only along the length of a line. That is the one axis where every piece is
+            // still a single line of text, so every piece is still recognizable.
             depth >= MAX_SPLIT_DEPTH -> recognizeWholeCrop(image)
-            aspect > MAX_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = false, depth)
-            aspect < MIN_RECOGNITION_ASPECT -> recognizeChunked(image, splitVertically = true, depth)
+            aspect > MAX_RECOGNITION_ASPECT -> recognizeChunked(image, depth)
+            // Too SQUARE to recognize: a speech bubble holding several lines, or a block of text.
+            // Do not split this vertically. Measured on hardware 2026-09-29: splitting it produced
+            // horizontal bands that each held two or three lines, and the recognizer — which
+            // expects ONE line — returned fragments as standalone regions. That is what made TTS
+            // say "eng", "okay" and "ing" out of context. Return blank instead: the region is
+            // dropped, the page comes back with fewer regions, and the adaptive router escalates to
+            // GLENS, which reads a multi-line bubble properly.
+            aspect < MIN_RECOGNITION_ASPECT -> blankRecognition()
             else -> recognizeWholeCrop(image)
         }
     }
 
+    /** No text, and a confidence of zero so nothing downstream mistakes noise for a confident read. */
+    private fun blankRecognition() = PpOcrRecognition(text = "", confidence = 0f)
+
     /**
-     * Splits a crop the recognizer cannot take whole, and joins the decoded text back together.
+     * Splits a crop that is too wide for the recognizer along its length, and joins the decoded
+     * text back together.
      *
      * The recognizer's tensor is height-pinned to 48 and width-clamped to
-     * `RECOGNITION_MAX_WIDTH`, so the usable aspect range is narrow and crops fall out of it on BOTH
-     * ends. A line of text is too wide and gets squashed; a speech bubble is roughly square and gets
-     * crushed to 7 CTC steps. Both decode to noise. Splitting along whichever axis is over-long
-     * brings either one back into range.
+     * `RECOGNITION_MAX_WIDTH`, so a long line of text arrives squashed — a median squeeze of 2.8x
+     * and up to 10.3x, measured on hardware 2026-09-28 — and decodes to noise. Splitting along the
+     * length is safe because every piece is still a single line of text.
      *
-     * Measured on hardware 2026-09-28: 34% of recognition calls arrived at a tensor <= 64px wide,
-     * and of those 96 decoded blank (the region is dropped, so the phrase is never spoken) and 98
-     * decoded a single character (the region survives, so a bare letter is spoken). Those two
-     * numbers are the whole reported symptom pair.
+     * Splitting the OTHER axis is not, and was tried on 2026-09-28 and reverted the next day. A
+     * square speech bubble split into horizontal bands gives pieces that each hold two or three
+     * lines, and a recognizer that expects one line returns fragments as standalone regions. That
+     * is what made TTS say "eng", "okay" and "ing" out of context. Too-square crops are now left to
+     * the adaptive router instead, which escalates to GLENS.
      */
     private fun recognizeChunked(
         image: Bitmap,
-        splitVertically: Boolean,
         depth: Int,
     ): PpOcrRecognition {
-        val target = if (splitVertically) {
-            // Aim a little past the middle of the range: a strip this shape gives the CTC head
-            // room to breathe without pushing the tensor back to its width clamp.
-            (MAX_RECOGNITION_ASPECT + MIN_RECOGNITION_ASPECT) / 2f
-        } else {
-            MAX_RECOGNITION_ASPECT
-        }
-        val along = if (splitVertically) image.height else image.width
-        val across = if (splitVertically) image.width else image.height
-        val count = ceil(along / (across * target)).toInt().coerceAtLeast(2)
+        val along = image.width
+        val count = ceil(along / (image.height * MAX_RECOGNITION_ASPECT)).toInt().coerceAtLeast(2)
         val slice = ceil(along.toFloat() / count).toInt().coerceIn(1, along)
         // Overlap so a character on a boundary is not cut in half. The duplicated text is dropped
         // by joinOcrChunks, so the repetition costs compute, not correctness.
@@ -219,11 +223,7 @@ internal class PpOcrV5Engine(
         var offset = 0
         while (offset < along) {
             val end = minOf(offset + slice, along)
-            val piece = if (splitVertically) {
-                Bitmap.createBitmap(image, 0, offset, image.width, end - offset)
-            } else {
-                Bitmap.createBitmap(image, offset, 0, end - offset, image.height)
-            }
+            val piece = Bitmap.createBitmap(image, offset, 0, end - offset, image.height)
             try {
                 val result = recognizeInRange(piece, depth + 1)
                 texts += result.text
@@ -514,18 +514,18 @@ private const val MAX_RECOGNITION_ASPECT =
     PpOcrPreprocess.RECOGNITION_MAX_WIDTH.toFloat() / PpOcrPreprocess.RECOGNITION_HEIGHT
 
 /**
- * Narrowest crop worth handing over whole. Below this the tensor width stops being 48 and the CTC
- * head is left with too few time steps: the head downsamples time by 8, so a 48px tensor is 6 steps
- * and a square speech bubble cannot decode at all. Measured 2026-09-28, a 458x427 bubble was
- * arriving as a 48x48 tensor with 7 steps and decoding to nothing.
- */
-private const val MIN_RECOGNITION_ASPECT = 3f
-
-/**
  * Splits are applied to their own output at most this many times. Two is enough for any crop the
  * detector produces; the cap exists so a pathological one cannot recurse forever.
  */
 private const val MAX_SPLIT_DEPTH = 2
+
+/**
+ * Narrowest crop worth handing to the recognizer at all. Below this the tensor stops being 48 wide
+ * and the CTC head is left with too few time steps — it downsamples time by 8, so a 48px tensor is
+ * 6 steps, and measured on 2026-09-28 a 458x427 bubble was arriving as 48x48 and decoding to
+ * nothing. Such a crop is a multi-line block, not a line, so it is not recognized locally.
+ */
+private const val MIN_RECOGNITION_ASPECT = 3f
 
 /** A crop smaller than this on both sides is detector noise, not a character. */
 private const val MIN_CROP_SIDE_PX = 12

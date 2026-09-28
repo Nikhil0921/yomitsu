@@ -696,9 +696,15 @@ internal class TtsPlaybackController(
                 "shortRegions=$shortRegions acquireMs=$acquireMs"
         }
         if (shortRegions > 0 && sentences.isNotEmpty()) {
+            // The region texts go in the log so a bad read can be diagnosed from the log instead of
+            // by listening to it. 2026-09-29: "kid" reaching TTS as "K", "1", "D" and "wants" as
+            // "w","a","n","t" were both reportable by ear and completely invisible in the log.
+            val shortTexts = dedupedRegions
+                .filter { it.text.trim().length <= 1 }
+                .joinToString("|") { it.text }
             logcat(LogPriority.WARN) {
-                "TTS page=$pageIndex has $shortRegions/${dedupedRegions.size} single-glyph regions; " +
-                    "read-aloud will spell those words out"
+                "TTS page=$pageIndex has $shortRegions/${dedupedRegions.size} single-glyph regions " +
+                    "texts=[$shortTexts]; read-aloud will spell those words out"
             }
         }
         if (sessionStartedAtElapsed != 0L) {
