@@ -465,12 +465,6 @@ class OcrRepositoryImpl(
         }
     }
 
-    /** True for transient server-side failures worth one retry (HTTP 5xx / 429 rate limit). */
-    private fun isTransientHttpFailure(error: Throwable): Boolean {
-        val message = error.message ?: return false
-        return message.contains("HTTP 5") || message.contains("HTTP 429")
-    }
-
     private suspend fun scanWithGlens(
         chapterId: Long,
         pageIndex: Int,
@@ -484,7 +478,7 @@ class OcrRepositoryImpl(
             if (firstError is CancellationException) throw firstError
             // Transient server failures (HTTP 502/429 observed on the Lens endpoint)
             // get exactly one retry, mirroring the recognizeText fallback policy.
-            if (!isTransientHttpFailure(firstError)) throw firstError
+            if (!isTransientOcrFailure(firstError)) throw firstError
 
             logcat(LogPriority.WARN, firstError) {
                 "OCR (glens) transient scan failure, retrying once"
@@ -570,7 +564,7 @@ class OcrRepositoryImpl(
             }
         } catch (firstError: Throwable) {
             if (firstError is CancellationException) throw firstError
-            if (!isTransientHttpFailure(firstError)) throw firstError
+            if (!isTransientOcrFailure(firstError)) throw firstError
             logcat(LogPriority.WARN, firstError) { "OCR (glens) transient escalation failure, retrying once" }
             try {
                 engineLocks.withTextEngineLock(EngineType.GLENS) {
@@ -892,4 +886,37 @@ class OcrRepositoryImpl(
             hybridEngine = null
         }
     }
+}
+
+/**
+ * True for a failure worth one retry: an HTTP 5xx or a 429 from the Lens endpoint, or any
+ * connectivity failure — DNS, refused connect, read timeout.
+ *
+ * The connectivity half is not decorative. The original rule matched only messages containing
+ * "HTTP 5" or "HTTP 429", and a read timeout's message is literally "timeout", so it never matched.
+ * Measured on hardware 2026-09-28 over a 19-page read-aloud: 15 network failures, 13 of them
+ * `SocketTimeoutException: timeout` plus 2 `ConnectionError`, and **neither retry line fired even
+ * once** — 45 tile responses completed and 0 pages produced a result.
+ *
+ * File level rather than a private member so a JVM test can reach it; `OcrRepositoryImpl` itself
+ * cannot be constructed off-device (real `Context`, real SQLite driver). The three exception
+ * checks are spelled out again rather than delegating to the class's `isConnectivityFailure`,
+ * which cannot be reached from here without moving it and its three call sites out of the class.
+ */
+internal fun isTransientOcrFailure(error: Throwable): Boolean {
+    var current: Throwable? = error
+    while (current != null) {
+        if (
+            current is UnknownHostException ||
+            current is ConnectException ||
+            current is SocketTimeoutException ||
+            current.message?.contains("Unable to resolve host", ignoreCase = true) == true ||
+            current.message?.contains("HTTP 5") == true ||
+            current.message?.contains("HTTP 429") == true
+        ) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
 }

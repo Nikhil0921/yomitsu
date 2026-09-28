@@ -20,12 +20,19 @@ object PpOcrDbPostprocess {
     const val SAME_LINE_VERTICAL_OVERLAP = 0.6f
 
     /**
-     * Horizontal gap between two boxes, as a multiple of the shorter box's height, still treated as
+     * Horizontal gap between two boxes, as a multiple of the TALLER box's height, still treated as
      * one line. Tracked display type leaves a gap of a fraction of the glyph height; two separate
      * bubbles on one row leave several times that.
      *
+     * The taller box, not the shorter, because a descender ("g") or an ascender ("h") is a taller
+     * box than its x-height neighbour ("a"). Sizing the bound from the shorter box let a
+     * descender/short pair reject a gap it should accept: measured on hardware 2026-09-28, 84 of
+     * 514 recognition calls were still a square `in=48x48` crop, and 8 of 19 spoken pages still
+     * carried single-glyph regions.
+     *
      * ponytail: raise it if adjacent speech bubbles on one row merge on real content; lower it if
-     * letter-spaced words still come apart.
+     * letter-spaced words still come apart. Measured headroom — two side-by-side bubbles in the
+     * test suite leave a gap 8x the taller box's height.
      */
     const val SAME_LINE_MAX_GAP_RATIO = 0.8f
 
@@ -146,8 +153,15 @@ object PpOcrDbPostprocess {
      *
      * Two boxes join only when they share a baseline and are close enough to be one line:
      * a vertical overlap of at least [SAME_LINE_VERTICAL_OVERLAP] of the shorter box,
-     * and a horizontal gap no larger than [SAME_LINE_MAX_GAP_RATIO] of it. The gap
+     * and a horizontal gap no larger than [SAME_LINE_MAX_GAP_RATIO] of the taller one. The gap
      * bound is what keeps two bubbles sitting side by side on one row apart.
+     *
+     * The two bounds are sized from different boxes on purpose. The overlap asks "does the shorter
+     * box sit substantially inside the taller one", which is what a shared baseline means, so it
+     * is measured against the shorter. The gap asks "is the tracking between them still word
+     * spacing", and a descender must not shrink that answer, so it is measured against the taller.
+     * Sizing the overlap from the taller box instead would make the rule stricter and merge fewer
+     * boxes, which is the opposite of what this function exists to do.
      *
      * Merging is transitive and left-to-right, so a whole word of glyphs collapses to one box.
      */
@@ -177,10 +191,9 @@ object PpOcrDbPostprocess {
 
     private fun isSameLine(a: OcrBoundingBox, b: OcrBoundingBox): Boolean {
         val overlap = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-        val shorterHeight = minOf(a.height, b.height)
-        if (overlap < shorterHeight * SAME_LINE_VERTICAL_OVERLAP) return false
+        if (overlap < minOf(a.height, b.height) * SAME_LINE_VERTICAL_OVERLAP) return false
         val gap = b.left - a.right
-        return gap <= shorterHeight * SAME_LINE_MAX_GAP_RATIO
+        return gap <= maxOf(a.height, b.height) * SAME_LINE_MAX_GAP_RATIO
     }
 
     /** 8-connected flood fill; returns how many pixels are in the blob and leaves them in [queue]. */

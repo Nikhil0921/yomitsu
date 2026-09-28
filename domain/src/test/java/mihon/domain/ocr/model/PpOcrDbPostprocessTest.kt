@@ -232,6 +232,26 @@ class PpOcrDbPostprocessTest {
         merged.single().right shouldBe 0.225f
     }
 
+    /**
+     * Measured on hardware 2026-09-28: 84 of 514 recognition calls were still a square
+     * `in=48x48` crop after the first line-grouping fix, and 8 of 19 spoken pages still carried
+     * single-glyph regions (page 1 = 8 of 9). A descender box ("g") is TALLER than its
+     * x-height neighbour ("a"), so a gap bound taken from the shorter box shrinks below the real
+     * inter-glyph gap and the two stop joining.
+     *
+     * Geometry: the tall box is 0.10 high and the short one 0.03, with a 0.05 gap between them.
+     * 0.05 exceeds 0.8 x 0.03 (shorter box -> refuse) and clears 0.8 x 0.10 (taller box -> join).
+     */
+    @Test
+    fun `a descender next to a short glyph still joins the line`() {
+        val descender = box(0.10f, 0.20f, 0.14f, 0.30f)
+        val short = box(0.19f, 0.205f, 0.23f, 0.235f)
+
+        val merged = PpOcrDbPostprocess.mergeSameLineBoxes(listOf(descender, short))
+
+        merged.size shouldBe 1
+    }
+
     @Test
     fun `a whole line box is left alone`() {
         val line = listOf(box(0.10f, 0.20f, 0.40f, 0.24f))
