@@ -8454,3 +8454,50 @@ imports reordered. `spotlessApply` fixed the ordering.
 the trap: `shortRegions` for an unchanged page still reflects whichever build last scanned it, so
 re-reading a cached chapter will show the old numbers and prove nothing. A fresh scan is required
 before either fix can be called verified.
+
+---
+
+## 2026-09-28 — Re-verification of the two fixes on 0.5.4.2-8321
+
+**THE SIGNING TRAP — caught before touching the device.** The APK assembled by the gate runs was
+signed `ed5a3e0c…793`, not the device's `e486ea51…8968`. Cause: `app/build.gradle.kts` only
+overrides the debug `signingConfig` when `MIHON_GITHUB_RELEASE` is set (env `storeFileBase64`) or
+when `keystore.properties` exists — neither is true here — so AGP falls back to the auto-generated
+keystore in `$HOME/.android/debug.keystore`. My gate invocations mounted `$HOME/.gradle` but not
+`$HOME/.android`, and each `--rm` container minted a fresh key. Installing that APK would have
+failed with a signature mismatch, and the "fix" would have looked like a device problem.
+**Every docker gate run for this repo must mount `-v "$HOME/.android":/home/vscode/.android`.**
+Worth noting this never showed up as a build failure — the build was perfectly green and the APK
+perfectly valid, just signed by the wrong key. Cert check before install is not optional.
+
+**Fresh scan confirmed:** 22 `TTS OCR cache miss` after Settings → Data → Clear OCR Cache
+(`SettingsDataScreen.kt:292`, `Injekt.get<ClearOcrCache>()`), so `shortRegions` reflects the new
+build and not the cache.
+
+**FIX 1 — improved, the pathological tail is gone, the goal is not met.**
+
+| | before (s25) | after (s35) |
+|---|---|---|
+| single-glyph regions | 40/167 = 24.0% | 18/112 = 16.1% |
+| worst page | page 1: 8/9 = 89% | page 20: 3/9 = 33% |
+| square `in=48x48` crops | 84/514 = 16.3% | 42/299 = 14.0% |
+
+The whole-word fragmentation that made TTS spell a word out letter by letter no longer appears; the
+worst page went from 89% of its regions being single glyphs to 33%. But the authorization asked for
+those crops to be **fully eliminated** and they are not — about one stray single-glyph region per
+page survives. My read is that most survivors are genuine isolated characters (SFX, lone
+punctuation, a design letter) rather than fragmentation, but that is a judgement from the ratio and
+not a verified identification of what those boxes contain. The next lever is raising
+`SAME_LINE_MAX_GAP_RATIO`, and it trades directly against merging real isolated characters, so it is
+not a free win. **Also not a controlled A/B**: 19 pages before, 21 after, and different rec-call
+counts, so the traversal differed.
+
+**FIX 2 — unexercised, correctly.** 0 network failures this run (3/3 ping, 45 ms), so neither retry
+line fired. That is the right outcome for a healthy network and is exactly the caveat flagged before
+the run; it is *not* evidence the fix works on hardware. The 11 unit cases remain the only proof.
+Forcing it means dropping the network mid-scan, which is scriptable if wanted.
+
+**Zero GLENS pages this run** (0 escalations, 0 `http end`), so the seam dedupe is STILL unexercised
+after two attempts. Plausibly because merged, larger local boxes score well enough for
+`OcrQualityRouter` to accept the page instead of escalating — which would be a nice second-order
+win — but the router logged nothing, so that is a hypothesis, not a finding.

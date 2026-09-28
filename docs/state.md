@@ -100,6 +100,29 @@ Last device:    2026-09-28 STAGES 2-5 PARTIAL DEVICE VERIFICATION (0.5.4.2-8316,
                   is stale and will not move until the chapter is re-scanned. Target metrics: square
                   `in=48x48` crops well under 16.3%, and `transient escalation failure, retrying
                   once` finally appearing.
+                  **RE-VERIFIED 2026-09-28** on 0.5.4.2-8321, capture
+                  logcat-20260928-030356-s35.log (50 MB), boundary YOMI_S35 line 256747 (08:34:00).
+                  **SIGNING TRAP, hit and caught before install:** the gate runs had been dropping the
+                  `~/.android` volume mount. With no signing env vars and no `keystore.properties`,
+                  AGP auto-generates a debug keystore in `$HOME/.android`, so the assembled APK was
+                  signed `ed5a3e0c…793` instead of the device's `e486ea51…8968`. Installing it would
+                  have failed on signature mismatch. **Every docker gate run must mount
+                  `-v "$HOME/.android":/home/vscode/.android`** or it silently mints a new key.
+                  **22 `TTS OCR cache miss`** — the Clear OCR Cache lever really worked, so this is a
+                  genuine fresh-scan measurement, not stale cache.
+                  **FIX 1 (line grouping) — IMPROVED, TAIL GONE, NOT ELIMINATED.** single-glyph
+                  regions 40/167 = 24.0% → 18/112 = 16.1%; worst page 8/9 = 89% → 3/9 = 33%; square
+                  `in=48x48` crops 16.3% (84/514) → 14.0% (42/299). The pathological whole-word
+                  fragmentation is gone, which was the actual complaint. The authorized goal of
+                  "fully eliminated" is **NOT met**: roughly one stray single-glyph region per page
+                  survives, plausibly genuine isolated characters (SFX, lone punctuation, a design
+                  letter) rather than fragmentation. Pushing the gap ratio higher is the next lever and
+                  it trades against over-merging those real isolated characters. **NOT a controlled
+                  A/B** — different traversal (19 vs 21 pages) and different rec-call counts.
+                  **FIX 2 (retry policy) — UNEXERCISED, and correctly so.** 0 network failures this
+                  run, so both retry lines stayed at 0. That is correct behaviour, not a regression;
+                  the network was healthy (3/3, 45 ms). Device-unproven either way; the 11 unit cases
+                  are the only evidence. Forcing it needs a mid-scan network drop.
                   **STILL UNEXERCISED:** Stage 2's bounded waits, Stage 3's seam dedupe (no GLENSLast session:   2026-09-27 OCR PIPELINE STAGES 1-5 COMPLETE AND COMMITTED (user-authorized,
                   "AUTHORIZED" + "PROCEED WITH STAGES 2 THROUGH 5"). 5 commits, tree clean:
                   74b17a463 Stage 1 code, ec68eb613 Stage 1 docs, 134473c80 Stage 2,
